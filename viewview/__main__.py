@@ -69,6 +69,58 @@ class ImageDisplayWidget(QtWidgets.QLabel):
         self.setPixmap(scaled)
 
 
+class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
+    def __init__(self, orientation: QtCore.Qt.Orientation, 
+                 parent: QtWidgets.QSplitter) -> None:
+        super().__init__(orientation, parent)
+        # TODO: choose default
+        self._saved_size = 300
+        self._saved_pos = None
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            self._saved_pos = event.position().toPoint()
+
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent, /) -> None:
+        current_position = event.position().toPoint()
+        if (event.button() == QtCore.Qt.MouseButton.LeftButton and 
+            current_position == self._saved_pos):
+            self._collapse_split() 
+        else:
+            super().mouseReleaseEvent(event)
+
+        self._saved_pos = None
+
+    def _collapse_split(self):
+        DISPLAY_SPLIT = 1
+        # TODO: choose the target dynamically
+        target_split = 0
+        splitter = self.splitter()
+        sizes = splitter.sizes()
+        target_size = sizes[target_split]
+
+        is_collapsed = target_size == 0
+
+        # TODO: could improve safety
+        if is_collapsed:
+            sizes[target_split] = self._saved_size
+            sizes[DISPLAY_SPLIT] -= self._saved_size
+            self._saved_size = 0
+        else:
+            self._saved_size = target_size
+            sizes[target_split] = 0
+            sizes[DISPLAY_SPLIT] += target_size
+
+        splitter.setSizes(sizes)
+
+
+class ToggleSplitter(QtWidgets.QSplitter):
+    def createHandle(self):
+        return ToggleSplitterHandle(self.orientation(), self)
+
+
 class CustomWidget(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -79,9 +131,17 @@ class CustomWidget(QtWidgets.QWidget):
 
         file_management = FileManagementWidget(image_display)
 
+
+        self._splitter = ToggleSplitter(QtCore.Qt.Orientation.Horizontal)
+        self._splitter.addWidget(file_management)
+        self._splitter.addWidget(image_display)
+        self._splitter.setSizes((300, 900))
+        self._splitter.setStretchFactor(0, 0)
+        self._splitter.setStretchFactor(1, 1)
+        self._splitter.setCollapsible(0, True)
+
         self._layout = QtWidgets.QHBoxLayout(self) 
-        self._layout.addWidget(file_management)
-        self._layout.addWidget(image_display)
+        self._layout.addWidget(self._splitter)
         self.setLayout(self._layout)
 
 
