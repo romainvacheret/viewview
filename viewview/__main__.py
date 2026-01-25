@@ -1,15 +1,15 @@
 import sys
 import pathlib
 
-from PySide6 import QtCore, QtWidgets
-from PySide6 import QtGui
-
-
+from PySide6 import QtCore, QtWidgets, QtGui
 
 
 class FileManagementWidget(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, image_display: 'ImageDisplayWidget'):
         super().__init__()
+        self._image_display = image_display
+
+        self.setMinimumWidth(200)
 
         # TODO: should be done after the window has appeared
         self._select_folder()
@@ -28,10 +28,12 @@ class FileManagementWidget(QtWidgets.QWidget):
         self._input = QtWidgets.QLabel(str(self._selected_folder))
 
     def _init_list(self):
-        def tmp_func():
+        def _callback(item: QtWidgets.QListWidgetItem):
             print('[Temporary] - List item has been pressed')
+            self._image_display.display_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
+
         self._list = QtWidgets.QListWidget()
-        self._list.itemClicked.connect(tmp_func)
+        self._list.itemClicked.connect(_callback)
 
     def _update_list(self):
         self._list.clear()
@@ -40,7 +42,7 @@ class FileManagementWidget(QtWidgets.QWidget):
         for file in self._selected_folder.glob('**/*.jpg'):
             filename = file.relative_to(self._selected_folder)
             item = QtWidgets.QListWidgetItem(str(filename))
-
+            item.setData(QtCore.Qt.ItemDataRole.UserRole, file)
             self._list.addItem(item)
 
     def _init_layout(self):
@@ -50,26 +52,37 @@ class FileManagementWidget(QtWidgets.QWidget):
         self.setLayout(self._layout)
 
 
+class ImageDisplayWidget(QtWidgets.QLabel):
+    def __init__(self):
+        super().__init__()
+
+    def display_image(self, img_path: pathlib.Path):
+        reader = QtGui.QImageReader(str(img_path))
+        self._pixel_map = QtGui.QPixmap.fromImage(reader.read())
+
+        scaled = self._pixel_map.scaled(
+            self.size(),
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+            QtCore.Qt.TransformationMode.SmoothTransformation
+        )
+
+        self.setPixmap(scaled)
+
+
 class CustomWidget(QtWidgets.QWidget):
     def __init__(self):
-
         super().__init__()
-        layout = QtWidgets.QHBoxLayout(self) 
-        img_path = '/Users/romain/Pictures/Wallpaper1.jpg'
-        reader = QtGui.QImageReader(img_path)
-        loaded_img = reader.read()
-        pixel_map = QtGui.QPixmap.fromImage(loaded_img)
 
-        img_label = QtWidgets.QLabel()
-        img_label.setPixmap(pixel_map)
-        img_label.setScaledContents(True)
-         
-        file_management = FileManagementWidget()
+        img_path = pathlib.Path('/Users/romain/Pictures/Wallpaper1.jpg')
+        image_display = ImageDisplayWidget()
+        image_display.display_image(img_path)
 
-        layout.addWidget(file_management)
-        layout.addWidget(img_label)
+        file_management = FileManagementWidget(image_display)
 
-        self.setLayout(layout)
+        self._layout = QtWidgets.QHBoxLayout(self) 
+        self._layout.addWidget(file_management)
+        self._layout.addWidget(image_display)
+        self.setLayout(self._layout)
 
 
 if __name__ == '__main__':
