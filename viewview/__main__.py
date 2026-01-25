@@ -9,23 +9,19 @@ class FileManagementWidget(QtWidgets.QWidget):
         super().__init__()
         self._image_display = image_display
 
-        self.setMinimumWidth(200)
-
-        # TODO: should be done after the window has appeared
-        self._select_folder()
-
         self._init_input()
         self._init_list()
         self._init_layout()
 
-        self._update_list()
-
-    def _select_folder(self):
-        self._browser = QtWidgets.QFileDialog(self, "Select folder")
+    def select_folder(self):
+        self._browser = QtWidgets.QFileDialog(self, 'Select folder')
         self._selected_folder = pathlib.Path(self._browser.getExistingDirectory())
 
+        self._input.setText(str(self._selected_folder))
+        self._update_list()
+
     def _init_input(self):
-        self._input = QtWidgets.QLabel(str(self._selected_folder))
+        self._input = QtWidgets.QLabel()
 
     def _init_list(self):
         def _callback(item: QtWidgets.QListWidgetItem):
@@ -55,6 +51,7 @@ class FileManagementWidget(QtWidgets.QWidget):
 class ImageDisplayWidget(QtWidgets.QLabel):
     def __init__(self):
         super().__init__()
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
     def display_image(self, img_path: pathlib.Path):
         reader = QtGui.QImageReader(str(img_path))
@@ -121,21 +118,18 @@ class ToggleSplitter(QtWidgets.QSplitter):
         return ToggleSplitterHandle(self.orientation(), self)
 
 
-class CustomWidget(QtWidgets.QWidget):
+class MainWidget(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
+        self._allow_close()
+        self._FILE_MANAGEMENT_SIZE = 300
 
-        img_path = pathlib.Path('/Users/romain/Pictures/Wallpaper1.jpg')
-        image_display = ImageDisplayWidget()
-        image_display.display_image(img_path)
-
-        file_management = FileManagementWidget(image_display)
-
+        self.image_display = ImageDisplayWidget()
+        self.file_management = FileManagementWidget(self.image_display)
 
         self._splitter = ToggleSplitter(QtCore.Qt.Orientation.Horizontal)
-        self._splitter.addWidget(file_management)
-        self._splitter.addWidget(image_display)
-        self._splitter.setSizes((300, 900))
+        self._splitter.addWidget(self.file_management)
+        self._splitter.addWidget(self.image_display)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._splitter.setCollapsible(0, True)
@@ -144,11 +138,28 @@ class CustomWidget(QtWidgets.QWidget):
         self._layout.addWidget(self._splitter)
         self.setLayout(self._layout)
 
+    def showEvent(self, event: QtGui.QShowEvent, /) -> None:
+        self._splitter.setSizes((
+            self._FILE_MANAGEMENT_SIZE,
+            self._splitter.width() - self._FILE_MANAGEMENT_SIZE))
+        return super().showEvent(event)
+
+    def _allow_close(self):
+        close_action = QtGui.QAction('Close', self)
+        close_action.setShortcut(QtGui.QKeySequence.StandardKey.Close)
+        close_action.triggered.connect(self.close)
+
+        self.addAction(close_action)
+
+    def select_folder(self):
+        self.file_management.select_folder()
+
 
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
 
-    widget = CustomWidget()
-    widget.showMaximized()
+    main_widget = MainWidget()
+    main_widget.showMaximized()
+    main_widget.select_folder()
 
     sys.exit(app.exec())
