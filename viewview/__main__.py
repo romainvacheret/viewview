@@ -1,13 +1,112 @@
 import sys
 import pathlib
 
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional
+
+from PIL import Image
+from PIL.ImageFile import ImageFile
+from PIL.ExifTags import Base
+
 from PySide6 import QtCore, QtWidgets, QtGui
 
 
+def _read_date(date_str: str) -> Optional[datetime]:
+    try:
+        return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+    # TODO: handle better
+    except ValueError:
+        return None
+
+
+@dataclass
+class ImageMetadata:
+    intial_date: Optional[datetime]
+    rating: int
+    description: str
+    camera: str
+    software: str
+    copyright: str
+
+@dataclass
+class ImageInfo:
+    metadata: ImageMetadata
+    width: int
+    height: int
+    path: pathlib.Path
+
+class MetadataHandler:
+    def read_metadata(self, image: pathlib.Path) -> Optional[ImageInfo]:
+        # TODO: add other image types 
+        match image.suffix:
+            case '.jpg': return self.read_jpeg(image)
+            case _: return None
+
+    def _read_exif(self, img: ImageFile) -> ImageMetadata:
+        exif = img.getexif()
+        return ImageMetadata(
+            _read_date(str(exif.get(Base.DateTimeOriginal))),
+            exif.get(Base.Rating, 0),
+            exif.get(Base.ImageDescription, ''),
+            exif.get(Base.Model, ''),
+            exif.get(Base.Software, ''),
+            exif.get(Base.Copyright, '')
+        )
+
+    def read_jpeg(self, image: pathlib.Path) -> ImageInfo:
+        img = Image.open(str(image))
+
+        return ImageInfo(self._read_exif(img), img.width, img.height, image)
+
+class MetadataWidget(QtWidgets.QGroupBox):
+    def __init__(self, parent: 'MainWidget'):
+        super().__init__('Metadata', parent)
+        self._layout = QtWidgets.QFormLayout(self)
+        self._parent = parent
+        self._metadata_handler = MetadataHandler()
+
+        self._datew = QtWidgets.QLabel('')
+        self._ratingw = QtWidgets.QLabel('')
+        self._descriptionw = QtWidgets.QLabel('')
+        self._cameraw = QtWidgets.QLabel('')
+        self._softwarew = QtWidgets.QLabel('')
+        self._copyrightw = QtWidgets.QLabel('')
+        self._dimensionw = QtWidgets.QLabel('')
+
+        self._layout.addRow('Date', self._datew)
+        self._layout.addRow('Rating', self._ratingw)
+        self._layout.addRow('Camera', self._descriptionw)
+        self._layout.addRow('Description', self._cameraw)
+        self._layout.addRow('Software', self._softwarew)
+        self._layout.addRow('Copyright', self._copyrightw)
+        self._layout.addRow('Dimensions', self._dimensionw)
+
+    def update_info(self, image_path: pathlib.Path):
+        print(image_path)
+        # TODO: path should never be None but check
+        metadata = self._metadata_handler.read_metadata(image_path)
+        # TODO: handle case an error occurs
+        if metadata is None:
+            return
+
+        meta = metadata.metadata
+
+        self._datew.setText(meta.intial_date.strftime("%d/%m/%Y") 
+                            if meta.intial_date is not None else '')
+        self._ratingw.setText(str(meta.rating))
+        self._descriptionw.setText(meta.description)
+        self._cameraw.setText(meta.camera)
+        self._softwarew.setText(meta.software)
+        self._copyrightw.setText(meta.copyright)
+        self._dimensionw.setText(f'{metadata.width}x{metadata.height}')
+
+
 class FileManagementWidget(QtWidgets.QWidget):
-    def __init__(self, image_display: 'ImageDisplayWidget'):
+    def __init__(self, parent: 'MainWidget'):
         super().__init__()
-        self._image_display = image_display
+        self._parent = parent
+        self._image_display = self._parent.image_display
 
         self._init_input()
         self._init_list()
@@ -25,8 +124,7 @@ class FileManagementWidget(QtWidgets.QWidget):
 
     def _init_list(self):
         def _callback(item: QtWidgets.QListWidgetItem):
-            print('[Temporary] - List item has been pressed')
-            self._image_display.display_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
+            self._parent.set_current_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
 
         self._list = QtWidgets.QListWidget()
         self._list.itemClicked.connect(_callback)
@@ -124,15 +222,21 @@ class MainWidget(QtWidgets.QWidget):
         self._allow_close()
         self._FILE_MANAGEMENT_SIZE = 300
 
+        self.image_path: Optional[pathlib.Path] = None
+
         self.image_display = ImageDisplayWidget()
-        self.file_management = FileManagementWidget(self.image_display)
+        self.file_management = FileManagementWidget(self)
+        self.metadata = MetadataWidget(self)
 
         self._splitter = ToggleSplitter(QtCore.Qt.Orientation.Horizontal)
         self._splitter.addWidget(self.file_management)
         self._splitter.addWidget(self.image_display)
+        self._splitter.addWidget(self.metadata)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
+        self._splitter.setStretchFactor(2, 0)
         self._splitter.setCollapsible(0, True)
+        self._splitter.setCollapsible(2, True)
 
         self._layout = QtWidgets.QHBoxLayout(self) 
         self._layout.addWidget(self._splitter)
@@ -153,6 +257,11 @@ class MainWidget(QtWidgets.QWidget):
 
     def select_folder(self):
         self.file_management.select_folder()
+
+    def set_current_image(self, image: pathlib.Path):
+        self.image_path = image
+        self.image_display.display_image(image)
+        self.metadata.update_info(image)
 
 
 if __name__ == '__main__':
