@@ -189,12 +189,21 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
         self._saved_pos = None
 
     def _collapse_split(self):
+        FILE_SPLIT = 0
         DISPLAY_SPLIT = 1
-        # TODO: choose the target dynamically
-        target_split = 0
+        METADATA_SPLIT = 2
+
+        # Handles number start at 1
+        target_split = FILE_SPLIT if self.splitter().handle(1) == self else \
+            METADATA_SPLIT
+
         splitter = self.splitter()
         sizes = splitter.sizes()
         target_size = sizes[target_split]
+
+        # Temporarily allow the split to collapse. If always allowed, will 
+        # collapse when drag and drop close to the edge
+        splitter.setCollapsible(target_split, True)
 
         is_collapsed = target_size == 0
 
@@ -209,6 +218,7 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
             sizes[DISPLAY_SPLIT] += target_size
 
         splitter.setSizes(sizes)
+        splitter.setCollapsible(target_split, False)
 
 
 class ToggleSplitter(QtWidgets.QSplitter):
@@ -235,8 +245,12 @@ class MainWidget(QtWidgets.QWidget):
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
         self._splitter.setStretchFactor(2, 0)
-        self._splitter.setCollapsible(0, True)
-        self._splitter.setCollapsible(2, True)
+
+        # Should not be possible to collapse the splits at any time because would 
+        # collapse when resizing close to the edge of the screen
+        # Look at `ToggleSplitterHandle._collapse_split` for more details
+        self._splitter.setCollapsible(0, False)
+        self._splitter.setCollapsible(2, False)
 
         self._layout = QtWidgets.QHBoxLayout(self) 
         self._layout.addWidget(self._splitter)
