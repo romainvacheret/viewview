@@ -104,7 +104,7 @@ class MetadataWidget(QtWidgets.QGroupBox):
 
 class FileManagementWidget(QtWidgets.QWidget):
     def __init__(self, parent: 'MainWidget'):
-        super().__init__()
+        super().__init__(parent)
         self._parent = parent
         self._image_display = self._parent.image_display
 
@@ -119,8 +119,12 @@ class FileManagementWidget(QtWidgets.QWidget):
         self._input.setText(str(self._selected_folder))
         self._update_list()
 
+        # QtWidgets.QWidget objects don't print their style by default
+        self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
+
     def _init_input(self):
         self._input = QtWidgets.QLabel()
+        self._input.setObjectName('filemanager-input')
 
     def _init_list(self):
         def _callback(item: QtWidgets.QListWidgetItem):
@@ -141,6 +145,7 @@ class FileManagementWidget(QtWidgets.QWidget):
 
     def _init_layout(self):
         self._layout = QtWidgets.QVBoxLayout(self)
+        self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.addWidget(self._input)
         self._layout.addWidget(self._list)
         self.setLayout(self._layout)
@@ -178,7 +183,7 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
 
         super().mousePressEvent(event)
 
-    def mouseReleaseEvent(self, event: QtGui.QMouseEvent, /) -> None:
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         current_position = event.position().toPoint()
         if (event.button() == QtCore.Qt.MouseButton.LeftButton and 
             current_position == self._saved_pos):
@@ -253,10 +258,11 @@ class MainWidget(QtWidgets.QWidget):
         self._splitter.setCollapsible(2, False)
 
         self._layout = QtWidgets.QHBoxLayout(self) 
+        self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.addWidget(self._splitter)
         self.setLayout(self._layout)
 
-    def showEvent(self, event: QtGui.QShowEvent, /) -> None:
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
         self._splitter.setSizes((
             self._FILE_MANAGEMENT_SIZE,
             self._splitter.width() - self._FILE_MANAGEMENT_SIZE))
@@ -281,6 +287,8 @@ class MainWidget(QtWidgets.QWidget):
 if __name__ == '__main__':
     app = QtWidgets.QApplication([])
 
+    with open("style.qss", "r", encoding="utf-8") as f:
+        app.setStyleSheet(f.read())
     main_widget = MainWidget()
     main_widget.showMaximized()
     main_widget.select_folder()

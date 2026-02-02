@@ -1,0 +1,30 @@
+QListWidget {
+    border-radius: 10px;
+    border: 5px solid #2c2c2e;
+    background: #2c2c2e;
+    font-family: "Comic Sans MS";
+}
+
+QListWidget::item {
+    background: #1f1f21;
+    padding: 7px 5px;
+    border: 1px solid #2c2c2e;
+    border-radius: 5px;
+}
+
+QListWidget::item:hover {
+    background: #2c2c2e;
+    border: 1px solid #1f1f21;
+}
+
+#filemanager-input {
+    font-family: "Comic Sans MS";
+    font-size: 14px;
+    font-weight: bold;
+    padding: 7px 7px;
+}
+
+FileManagementWidget {
+    border-radius: 5px;
+    padding: 5px;
+}
