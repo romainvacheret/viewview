@@ -28,3 +28,12 @@ FileManagementWidget {
     border-radius: 5px;
     padding: 5px;
 }
+
+QLabel[role="title"] {
+    font-weight: bold;
+    font-size: 13px;
+}
+
+MetadataWidget QLabel {
+    font-family: "Comic Sans MS";
+}

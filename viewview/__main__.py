@@ -61,26 +61,50 @@ class MetadataHandler:
 
 class MetadataWidget(QtWidgets.QGroupBox):
     def __init__(self, parent: 'MainWidget'):
-        super().__init__('Metadata', parent)
+        super().__init__('', parent)
         self._layout = QtWidgets.QFormLayout(self)
+        self._layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignLeft |
+            QtCore.Qt.AlignmentFlag.AlignTop)
+        self._layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self._layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self._parent = parent
         self._metadata_handler = MetadataHandler()
 
-        self._datew = QtWidgets.QLabel('')
-        self._ratingw = QtWidgets.QLabel('')
-        self._descriptionw = QtWidgets.QLabel('')
-        self._cameraw = QtWidgets.QLabel('')
-        self._softwarew = QtWidgets.QLabel('')
-        self._copyrightw = QtWidgets.QLabel('')
-        self._dimensionw = QtWidgets.QLabel('')
+        def _init_label(text: str, role: str):
+            label = QtWidgets.QLabel(text)
 
-        self._layout.addRow('Date', self._datew)
-        self._layout.addRow('Rating', self._ratingw)
-        self._layout.addRow('Camera', self._descriptionw)
-        self._layout.addRow('Description', self._cameraw)
-        self._layout.addRow('Software', self._softwarew)
-        self._layout.addRow('Copyright', self._copyrightw)
-        self._layout.addRow('Dimensions', self._dimensionw)
+            hor_policy = QtWidgets.QSizePolicy.Policy.Ignored \
+                if role == 'description' else QtWidgets.QSizePolicy.Policy.Preferred
+            label.setSizePolicy(hor_policy, QtWidgets.QSizePolicy.Policy.Preferred)
+            label.setMinimumWidth(0)
+            # Required define role based style
+            label.setProperty('role', role)
+            return label
+
+        self._datew = _init_label('', 'description')
+        self._ratingw = _init_label('', 'description')
+        self._descriptionw = _init_label('', 'description')
+        self._cameraw = _init_label('', 'description')
+        self._softwarew = _init_label('', 'description')
+        self._copyrightw = _init_label('', 'description')
+        self._dimensionw = _init_label('', 'description')
+
+        # Need to 'manually' create the title labels to give them a style
+        date_title = _init_label('Date', 'title')
+        rating_title = _init_label('Rating', 'title')
+        description_title = _init_label('Description', 'title')
+        camera_title = _init_label('Camera', 'title')
+        software_title = _init_label('Software', 'title')
+        copyright_title = _init_label('Copyright', 'title')
+        dimension_title = _init_label('Dimension', 'title')
+
+        self._layout.addRow(date_title, self._datew)
+        self._layout.addRow(rating_title, self._ratingw)
+        self._layout.addRow(description_title, self._descriptionw)
+        self._layout.addRow(camera_title, self._cameraw)
+        self._layout.addRow(software_title, self._softwarew)
+        self._layout.addRow(copyright_title, self._copyrightw)
+        self._layout.addRow(dimension_title, self._dimensionw)
 
     def update_info(self, image_path: pathlib.Path):
         print(image_path)
