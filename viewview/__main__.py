@@ -222,7 +222,7 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
         DISPLAY_SPLIT = 1
         METADATA_SPLIT = 2
 
-        # Handles number start at 1
+        # Handles number starts at 1
         target_split = FILE_SPLIT if self.splitter().handle(1) == self else \
             METADATA_SPLIT
 
@@ -230,9 +230,13 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
         sizes = splitter.sizes()
         target_size = sizes[target_split]
 
-        # Temporarily allow the split to collapse. If always allowed, will 
-        # collapse when drag and drop close to the edge
-        splitter.setCollapsible(target_split, True)
+        # Both splits should allow collapse: when using `splitter.setSizes()`
+        # the sizes that are passed are not necessariy applied. In particular, 
+        # if a split has `collapsible` to False, its size cannot be 0.
+        # For that reason it would expand back to its "minimum size" (e.g.
+        # the one from a label)
+        splitter.setCollapsible(FILE_SPLIT, True)
+        splitter.setCollapsible(METADATA_SPLIT, True)
 
         is_collapsed = target_size == 0
 
@@ -247,7 +251,9 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
             sizes[DISPLAY_SPLIT] += target_size
 
         splitter.setSizes(sizes)
-        splitter.setCollapsible(target_split, False)
+        # End of temporary collapsible state
+        splitter.setCollapsible(FILE_SPLIT, False)
+        splitter.setCollapsible(METADATA_SPLIT, False)
 
 
 class ToggleSplitter(QtWidgets.QSplitter):
