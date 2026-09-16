@@ -1,10 +1,9 @@
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 import shutil
 
-from .lib import FileManager
+from .metadata import ImageMetadataReader
 
 
 @dataclass(frozen=True)
@@ -53,12 +52,12 @@ def plan_organization(
 
     for image in images:
         try:
-            info = FileManager.get_info(image)
+            info = ImageMetadataReader.get_info(image)
         except (OSError, ValueError) as error:
             invalid_files.append(InvalidFile(image, str(error)))
             continue
 
-        if isinstance(info.date, datetime):
+        if info.date is not None:
             target_folder = destination / info.date.strftime('%Y/%m/%d')
         else:
             target_folder = destination / undated_folder
