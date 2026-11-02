@@ -1,7 +1,10 @@
 """Read MOV dates using Hachoir's pure Python QuickTime parser."""
 
 from datetime import datetime
+from contextlib import redirect_stderr
+import io
 from pathlib import Path
+import sys
 
 from hachoir.field import FieldError
 from hachoir.stream import InputStreamError
@@ -39,7 +42,20 @@ def _apple_date(meta) -> datetime | None:
     return None
 
 
-def read_mov_date(filepath: Path) -> datetime | None:
+def read_mov_date(filepath: Path, *, warnings: list[str] | None = None) -> datetime | None:
+    # Hachoir writes diagnostics directly to stderr rather than Python logging.
+    diagnostics = io.StringIO()
+    try:
+        with redirect_stderr(diagnostics):
+            return _read_mov_date(filepath)
+    finally:
+        for message in diagnostics.getvalue().splitlines():
+            print(f'{filepath}: {message}', file=sys.stderr)
+            if warnings is not None and message not in warnings:
+                warnings.append(message)
+
+
+def _read_mov_date(filepath: Path) -> datetime | None:
     parser = createParser(str(filepath))
     if parser is None:
         raise ValueError('Cannot read MOV metadata: invalid or unsupported file')

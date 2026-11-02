@@ -20,10 +20,18 @@ class PlannedFile:
 
 
 @dataclass(frozen=True)
+class FileWarning:
+    path: Path
+    message: str
+
+
+@dataclass(frozen=True)
 class OrganizationPlan:
     files: list[PlannedFile]
     invalid_files: list[InvalidFile]
     skipped_files: list[Path] = field(default_factory=list)
+    identical_files: list[PlannedFile] = field(default_factory=list)
+    warnings: list[FileWarning] = field(default_factory=list)
 
 
 def list_images(folder: Path, extensions: Iterable[str]) -> list[Path]:
@@ -52,13 +60,18 @@ def plan_organization(
     invalid_files: list[InvalidFile] = []
     planned_destinations: dict[Path, Path] = {}
     skipped_files: list[Path] = []
+    identical_files: list[PlannedFile] = []
+    warnings: list[FileWarning] = []
 
     for image in images:
         try:
             info = ImageMetadataReader.get_info(image)
         except (OSError, ValueError) as error:
-            invalid_files.append(InvalidFile(image, str(error)))
+            reason = error.strerror if isinstance(error, OSError) and error.strerror else str(error)
+            invalid_files.append(InvalidFile(image, reason))
             continue
+
+        warnings.extend(FileWarning(image, message) for message in info.warnings)
 
         if info.date is not None:
             target_folder = destination / info.date.strftime('%Y/%m/%d')
@@ -72,6 +85,7 @@ def plan_organization(
             existing = planned_destinations.get(target, target)
             if existing.is_file() and filecmp.cmp(image, existing, shallow=False):
                 skipped_files.append(image)
+                identical_files.append(PlannedFile(image, target))
                 break
             suffix += 1
             target = target_folder / f'{image.stem}_{suffix}{image.suffix}'
@@ -79,7 +93,7 @@ def plan_organization(
             planned_destinations[target] = image
             planned_files.append(PlannedFile(image, target))
 
-    return OrganizationPlan(planned_files, invalid_files, skipped_files)
+    return OrganizationPlan(planned_files, invalid_files, skipped_files, identical_files, warnings)
 
 
 def apply_plan(plan: OrganizationPlan, move: bool = False) -> None:

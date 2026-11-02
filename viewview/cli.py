@@ -23,9 +23,11 @@ def main(argv: list[str] | None = None) -> int:
         return gui_main()
 
     from .core.organization import import_images
+    from .core.reporting import write_import_report
 
     try:
         plan = import_images(args.source, args.destination, move=args.move)
+        report = write_import_report(plan, args.destination, move=args.move)
     except (OSError, ValueError) as error:
         print(f'Import failed: {error}', file=sys.stderr)
         return 1
@@ -34,4 +36,5 @@ def main(argv: list[str] | None = None) -> int:
         print(f'Skipped {invalid.path}: {invalid.reason}', file=sys.stderr)
     action = 'Moved' if args.move else 'Copied'
     print(f'{action} {len(plan.files)}; identical {len(plan.skipped_files)}; invalid {len(plan.invalid_files)}')
+    print(f'Report: {report}')
     return 1 if plan.invalid_files else 0
