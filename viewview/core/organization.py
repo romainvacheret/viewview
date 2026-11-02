@@ -1,9 +1,10 @@
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import shutil
+import filecmp
 
-from .metadata import ImageMetadataReader
+from .metadata import HANDLED_FORMATS, ImageMetadataReader
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class PlannedFile:
 class OrganizationPlan:
     files: list[PlannedFile]
     invalid_files: list[InvalidFile]
+    skipped_files: list[Path] = field(default_factory=list)
 
 
 def list_images(folder: Path, extensions: Iterable[str]) -> list[Path]:
@@ -48,7 +50,8 @@ def plan_organization(
     """Build an organization plan without copying or moving files."""
     planned_files: list[PlannedFile] = []
     invalid_files: list[InvalidFile] = []
-    planned_destinations: set[Path] = set()
+    planned_destinations: dict[Path, Path] = {}
+    skipped_files: list[Path] = []
 
     for image in images:
         try:
@@ -64,22 +67,19 @@ def plan_organization(
 
         target = target_folder / image.name
 
-        if target in planned_destinations:
-            invalid_files.append(
-                InvalidFile(image, f'duplicate destination: {target}')
-            )
-            continue
+        suffix = 0
+        while target in planned_destinations or target.exists() or target.is_symlink():
+            existing = planned_destinations.get(target, target)
+            if existing.is_file() and filecmp.cmp(image, existing, shallow=False):
+                skipped_files.append(image)
+                break
+            suffix += 1
+            target = target_folder / f'{image.stem}_{suffix}{image.suffix}'
+        else:
+            planned_destinations[target] = image
+            planned_files.append(PlannedFile(image, target))
 
-        if target.exists():
-            invalid_files.append(
-                InvalidFile(image, f'destination already exists: {target}')
-            )
-            continue
-
-        planned_destinations.add(target)
-        planned_files.append(PlannedFile(image, target))
-
-    return OrganizationPlan(planned_files, invalid_files)
+    return OrganizationPlan(planned_files, invalid_files, skipped_files)
 
 
 def apply_plan(plan: OrganizationPlan, move: bool = False) -> None:
@@ -87,10 +87,14 @@ def apply_plan(plan: OrganizationPlan, move: bool = False) -> None:
     for planned_file in plan.files:
         planned_file.destination.parent.mkdir(parents=True, exist_ok=True)
 
+        # Exclusive creation protects both copy and move from overwriting files.
+        with planned_file.source.open('rb') as source:
+            with planned_file.destination.open('xb') as destination:
+                shutil.copyfileobj(source, destination)
+        shutil.copystat(planned_file.source, planned_file.destination)
         if move:
-            shutil.move(planned_file.source, planned_file.destination)
-        else:
-            shutil.copy2(planned_file.source, planned_file.destination)
+            # Remove the original only after the copy and metadata transfer succeed.
+            planned_file.source.unlink()
 
 
 def organize_images(
@@ -112,3 +116,16 @@ def organize_images(
         apply_plan(plan, move=move)
 
     return plan
+
+
+def import_images(source: Path, destination: Path, *, move: bool = False) -> OrganizationPlan:
+    """Recursively copy or move images into date folders; skip identical files."""
+    source = source.resolve()
+    destination = destination.resolve()
+    if not source.is_dir():
+        raise ValueError(f'Source is not a directory: {source}')
+    if destination == source or source in destination.parents:
+        raise ValueError('Destination must be outside the source directory')
+    if destination.exists() and not destination.is_dir():
+        raise ValueError(f'Destination is not a directory: {destination}')
+    return organize_images(list_images(source, HANDLED_FORMATS), destination, move=move, apply=True)
