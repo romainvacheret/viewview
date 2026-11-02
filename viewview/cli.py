@@ -8,7 +8,10 @@ import sys
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog='viewview')
     commands = parser.add_subparsers(dest='command')
-    importer = commands.add_parser('import', help='Recursively copy or move images into YYYY/MM/DD folders')
+    importer = commands.add_parser(
+        'import', help='Recursively copy or move images and MOV videos into YYYY/MM/DD folders',
+        description='Import images and MOV videos into folders by recording date.',
+    )
     importer.add_argument('source', type=Path)
     importer.add_argument('destination', type=Path)
     importer.add_argument('--move', action='store_true', help='Move files instead of copying them')

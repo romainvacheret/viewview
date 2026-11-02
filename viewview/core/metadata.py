@@ -9,7 +9,7 @@ from typing import Final
 
 
 # TODO: add more formats
-HANDLED_FORMATS: Final[set[str]] = {'.jpeg', '.jpg', '.cr2'}
+HANDLED_FORMATS: Final[set[str]] = {'.jpeg', '.jpg', '.cr2', '.heic', '.mov', '.png'}
 
 
 @dataclass(frozen=True)
@@ -22,6 +22,11 @@ class FileInfo:
 class ImageMetadataReader:
     @staticmethod
     def get_info(filepath: Path) -> FileInfo:
+        if filepath.suffix.lower() == '.mov':
+            from .video_metadata import read_mov_date
+
+            return FileInfo(filepath, filepath.stat().st_size, read_mov_date(filepath))
+
         with open(filepath, 'rb') as file:
             # Only read the necessary tag to save time.
             tags = exifread.process_file(

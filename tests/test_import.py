@@ -56,6 +56,18 @@ class ImportTests(unittest.TestCase):
         import_images(self.source, self.destination)
         self.assertTrue((self.destination / '_undated/photo.JPG').is_file())
 
+    def test_heic_copy_and_move(self):
+        for move, extension in [(False, '.heic'), (True, '.HEIC')]:
+            with self.subTest(move=move, extension=extension):
+                image = self.source / 'nested' / f'apple{extension}'
+                image.parent.mkdir(exist_ok=True)
+                image.write_bytes(b'heic contents')
+                plan = import_images(self.source, self.destination, move=move)
+                target = self.destination / '2026/11/02' / image.name
+                self.assertEqual(target.read_bytes(), b'heic contents')
+                self.assertEqual(image.exists(), not move)
+                self.assertIn(image, [file.source for file in plan.files])
+
     def test_destination_inside_source_is_rejected(self):
         with self.assertRaises(ValueError):
             import_images(self.source, self.source / 'output')
