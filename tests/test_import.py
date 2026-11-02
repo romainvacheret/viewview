@@ -1,6 +1,7 @@
 import contextlib
 from datetime import datetime
 import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -94,6 +95,88 @@ class ImportTests(unittest.TestCase):
         with contextlib.redirect_stderr(io.StringIO()):
             result = main(['import', str(self.root / 'missing'), str(self.destination)])
         self.assertEqual(result, 1)
+
+    def test_dry_run_matches_import_without_changing_either_tree(self):
+        for move in (False, True):
+            with self.subTest(move=move):
+                destination = self.root / f'destination-{move}'
+                self.image('a', b'abc')
+                self.image('b', b'abc')
+                self.image('c', b'xyz')
+                target = destination / '2026/11/02/photo.JPG'
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b'abc')
+
+                def snapshot(folder):
+                    return {str(p.relative_to(folder)): p.read_bytes() if p.is_file() else None
+                            for p in folder.rglob('*')}
+
+                before = snapshot(self.root)
+                preview = import_images(self.source, destination, move=move, dry_run=True)
+                self.assertEqual(snapshot(self.root), before)
+                actual = import_images(self.source, destination, move=move)
+                self.assertEqual(preview, actual)
+
+    def test_cli_dry_run_reports_duplicates_and_invalid_files_without_writing_destination(self):
+        for move in (False, True):
+            with self.subTest(move=move):
+                first = self.image('a', b'abc')
+                duplicate = self.image('b', b'abc')
+                bad = self.image('bad', b'bad')
+
+                def metadata(path):
+                    if path == bad:
+                        raise ValueError('Invalid EXIF date')
+                    return FileInfo(path, path.stat().st_size, self.date)
+
+                arguments = ['import', str(self.source), str(self.destination), '--dry-run']
+                if move:
+                    arguments.append('--move')
+                with patch('viewview.core.organization.ImageMetadataReader.get_info', side_effect=metadata):
+                    with contextlib.redirect_stdout(io.StringIO()) as output:
+                        with contextlib.redirect_stderr(io.StringIO()) as errors:
+                            result = main(arguments)
+                self.assertEqual(result, 1)
+                action = 'Moved' if move else 'Copied'
+                self.assertIn(f'{action} 1; identical 1; invalid 1', output.getvalue())
+                self.assertIn(f'Skipped {bad}: Invalid EXIF date', errors.getvalue())
+                report_path = Path(output.getvalue().split('Report: ', 1)[1].strip())
+                self.addCleanup(report_path.unlink)
+                report = json.loads(report_path.read_text())
+                self.assertTrue(report['dry_run'])
+                self.assertEqual(report['operation'], 'move' if move else 'copy')
+                self.assertEqual(report['identical_files'][0]['source'], str(duplicate))
+                self.assertEqual(report['invalid_files'][0]['path'], str(bad))
+                self.assertFalse(self.destination.exists())
+                self.assertEqual(first.read_bytes(), b'abc')
+                self.assertEqual(duplicate.read_bytes(), b'abc')
+                self.assertEqual(bad.read_bytes(), b'bad')
+
+    def test_dry_run_detects_blocked_destination_parent(self):
+        self.image('a', b'abc')
+        self.destination.mkdir()
+        (self.destination / '2026').write_bytes(b'blocking file')
+        with self.assertRaises(NotADirectoryError):
+            import_images(self.source, self.destination, dry_run=True)
+
+    def test_dry_run_checks_destination_and_move_source_permissions(self):
+        self.image('a', b'abc')
+        for move in (False, True):
+            with self.subTest(move=move):
+                with patch('viewview.core.organization.os.access', return_value=False):
+                    with self.assertRaises(PermissionError):
+                        import_images(self.source, self.destination, move=move, dry_run=True)
+        with patch('viewview.core.organization.os.access', side_effect=[True, False]):
+            with self.assertRaises(PermissionError):
+                import_images(self.source, self.destination, move=True, dry_run=True)
+
+    def test_dry_run_reads_entire_source_and_propagates_read_errors(self):
+        image = self.image('a', b'abc')
+        plan = plan_organization([image], self.destination)
+        with patch.object(Path, 'open', side_effect=OSError('Read failed')):
+            with self.assertRaisesRegex(OSError, 'Read failed'):
+                apply_plan(plan, dry_run=True)
+        self.assertFalse(self.destination.exists())
 
     def test_cli_move_preserves_conflicts_and_skips_identical(self):
         first = self.image('a', b'abc')

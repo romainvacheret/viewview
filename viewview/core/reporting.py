@@ -8,8 +8,11 @@ import tempfile
 from .organization import OrganizationPlan
 
 
-def write_import_report(plan: OrganizationPlan, destination: Path, *, move: bool) -> Path:
-    destination.mkdir(parents=True, exist_ok=True)
+def write_import_report(
+    plan: OrganizationPlan, destination: Path, *, move: bool, dry_run: bool = False,
+) -> Path:
+    if not dry_run:
+        destination.mkdir(parents=True, exist_ok=True)
     created_at = datetime.now(timezone.utc)
     report = {
         'created_at': created_at.isoformat(),
@@ -27,11 +30,13 @@ def write_import_report(plan: OrganizationPlan, destination: Path, *, move: bool
             for warning in plan.warnings
         ],
     }
+    if dry_run:
+        report['dry_run'] = True
     # Keep reports from previous runs and never overwrite an existing file.
     with tempfile.NamedTemporaryFile(
         mode='w', encoding='utf-8',
         prefix=f'import-report-{created_at:%Y%m%dT%H%M%S.%fZ}-', suffix='.json',
-        dir=destination, delete=False,
+        dir=None if dry_run else destination, delete=False,
     ) as output:
         json.dump(report, output, indent=2, ensure_ascii=False)
         output.write('\n')

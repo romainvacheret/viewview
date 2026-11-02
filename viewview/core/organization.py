@@ -3,6 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import shutil
 import filecmp
+import errno
+import os
 
 from .metadata import HANDLED_FORMATS, ImageMetadataReader
 
@@ -96,9 +98,34 @@ def plan_organization(
     return OrganizationPlan(planned_files, invalid_files, skipped_files, identical_files, warnings)
 
 
-def apply_plan(plan: OrganizationPlan, move: bool = False) -> None:
-    """Apply a previously generated plan by copying or moving files."""
+def _check_writable_directory(directory: Path) -> None:
+    """Check the nearest existing ancestor without creating directories."""
+    while not directory.exists() and not directory.is_symlink():
+        directory = directory.parent
+    if not directory.is_dir():
+        raise NotADirectoryError(errno.ENOTDIR, os.strerror(errno.ENOTDIR), str(directory))
+    if not os.access(directory, os.W_OK | os.X_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(directory))
+
+
+def apply_plan(plan: OrganizationPlan, move: bool = False, *, dry_run: bool = False) -> None:
+    """Copy or move planned files, or only check permissions and reads in a dry run.
+
+    Dry runs cannot guarantee write success, available space, or metadata updates.
+    """
     for planned_file in plan.files:
+        if dry_run:
+            _check_writable_directory(planned_file.destination.parent)
+            if planned_file.destination.exists() or planned_file.destination.is_symlink():
+                raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST),
+                                      str(planned_file.destination))
+            if move:
+                _check_writable_directory(planned_file.source.parent)
+            # Read the entire source to detect read errors beyond the metadata.
+            with planned_file.source.open('rb') as source:
+                while source.read(1024 * 1024):
+                    pass
+            continue
         planned_file.destination.parent.mkdir(parents=True, exist_ok=True)
 
         # Exclusive creation protects both copy and move from overwriting files.
@@ -117,6 +144,7 @@ def organize_images(
     *,
     move: bool = False,
     apply: bool = False,
+    dry_run: bool = False,
     undated_folder: str = '_undated',
 ) -> OrganizationPlan:
     """Plan image organization and optionally apply it."""
@@ -127,13 +155,15 @@ def organize_images(
     )
 
     if apply:
-        apply_plan(plan, move=move)
+        apply_plan(plan, move=move, dry_run=dry_run)
 
     return plan
 
 
-def import_images(source: Path, destination: Path, *, move: bool = False) -> OrganizationPlan:
-    """Recursively copy or move images into date folders; skip identical files."""
+def import_images(
+    source: Path, destination: Path, *, move: bool = False, dry_run: bool = False,
+) -> OrganizationPlan:
+    """Import images into date folders, or validate without writing in a dry run."""
     source = source.resolve()
     destination = destination.resolve()
     if not source.is_dir():
@@ -142,4 +172,5 @@ def import_images(source: Path, destination: Path, *, move: bool = False) -> Org
         raise ValueError('Destination must be outside the source directory')
     if destination.exists() and not destination.is_dir():
         raise ValueError(f'Destination is not a directory: {destination}')
-    return organize_images(list_images(source, HANDLED_FORMATS), destination, move=move, apply=True)
+    return organize_images(list_images(source, HANDLED_FORMATS), destination,
+                           move=move, apply=True, dry_run=dry_run)
