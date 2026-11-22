@@ -11,7 +11,7 @@
         let
           pkgs = import nixpkgs { inherit system; };
           python = pkgs.python3.withPackages (ps: with ps; [
-            pyside6 pillow exifread hachoir
+            pyside6 pillow pillow-heif exifread hachoir
           ]);
         in {
           default = pkgs.mkShell {

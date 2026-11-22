@@ -1,5 +1,9 @@
 # Viewview
 
+The GUI displays JPEG (`.jpg`, `.jpeg`), PNG, and HEIC/HEIF pictures, including
+uppercase extensions and pictures in subdirectories. HEIC/HEIF decoding uses
+`pillow-heif` (libheif), included in the Nix shell and pip requirements.
+
 Run the GUI with its dependencies provided by Nix:
 
 ```sh

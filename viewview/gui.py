@@ -6,9 +6,16 @@ from typing import Optional
 
 from PIL import Image
 from PIL.ImageFile import ImageFile
-from PIL.ExifTags import Base
+from PIL.ExifTags import Base, IFD
+from PIL.ImageQt import ImageQt
+from pillow_heif import register_heif_opener
 
 from PySide6 import QtCore, QtWidgets, QtGui
+
+register_heif_opener()
+
+HEIF_IMAGE_FORMATS = {'.heic', '.heif'}
+DISPLAYED_IMAGE_FORMATS = {'.jpg', '.jpeg', '.png'} | HEIF_IMAGE_FORMATS
 
 
 def _read_date(date_str: str) -> Optional[datetime]:
@@ -37,15 +44,17 @@ class ImageInfo:
 
 class MetadataHandler:
     def read_metadata(self, image: pathlib.Path) -> Optional[ImageInfo]:
-        # TODO: add other image types 
-        match image.suffix:
-            case '.jpg': return self.read_jpeg(image)
-            case _: return None
+        if image.suffix.lower() not in DISPLAYED_IMAGE_FORMATS:
+            return None
+        with Image.open(image) as img:
+            return ImageInfo(self._read_exif(img), img.width, img.height, image)
 
     def _read_exif(self, img: ImageFile) -> ImageMetadata:
         exif = img.getexif()
+        photo_exif = exif.get_ifd(IFD.Exif)
         return ImageMetadata(
-            _read_date(str(exif.get(Base.DateTimeOriginal))),
+            _read_date(str(photo_exif.get(Base.DateTimeOriginal,
+                                         exif.get(Base.DateTimeOriginal)))),
             exif.get(Base.Rating, 0),
             exif.get(Base.ImageDescription, ''),
             exif.get(Base.Model, ''),
@@ -54,9 +63,8 @@ class MetadataHandler:
         )
 
     def read_jpeg(self, image: pathlib.Path) -> ImageInfo:
-        img = Image.open(str(image))
-
-        return ImageInfo(self._read_exif(img), img.width, img.height, image)
+        with Image.open(image) as img:
+            return ImageInfo(self._read_exif(img), img.width, img.height, image)
 
 class MetadataWidget(QtWidgets.QGroupBox):
     def __init__(self, parent: 'MainWidget'):
@@ -159,8 +167,9 @@ class FileManagementWidget(QtWidgets.QWidget):
     def _update_list(self):
         self._list.clear()
 
-        # TODO: add other image types later on
-        for file in self._selected_folder.glob('**/*.jpg'):
+        for file in self._selected_folder.rglob('*'):
+            if not file.is_file() or file.suffix.lower() not in DISPLAYED_IMAGE_FORMATS:
+                continue
             filename = file.relative_to(self._selected_folder)
             item = QtWidgets.QListWidgetItem(str(filename))
             item.setData(QtCore.Qt.ItemDataRole.UserRole, file)
@@ -180,8 +189,13 @@ class ImageDisplayWidget(QtWidgets.QLabel):
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
     def display_image(self, img_path: pathlib.Path):
-        reader = QtGui.QImageReader(str(img_path))
-        self._pixel_map = QtGui.QPixmap.fromImage(reader.read())
+        if img_path.suffix.lower() in HEIF_IMAGE_FORMATS:
+            # Qt's standard image plugins do not decode HEIC. Pillow uses libheif.
+            with Image.open(img_path) as image:
+                self._pixel_map = QtGui.QPixmap.fromImage(ImageQt(image.convert('RGBA')))
+        else:
+            reader = QtGui.QImageReader(str(img_path))
+            self._pixel_map = QtGui.QPixmap.fromImage(reader.read())
 
         scaled = self._pixel_map.scaled(
             self.size(),
