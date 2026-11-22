@@ -175,10 +175,14 @@ class MetadataWidget(QtWidgets.QGroupBox):
         self.setMaximumWidth(max(self.minimumSizeHint().width(), width))
 
 
-class PathListWidget(QtWidgets.QListWidget):
+class PathTreeWidget(QtWidgets.QTreeWidget):
     def __init__(self):
         super().__init__()
         self.setMouseTracking(True)
+        self.setHeaderHidden(True)
+        self.setIndentation(18)
+        self.setUniformRowHeights(True)
+        self.setExpandsOnDoubleClick(False)
 
     def viewportEvent(self, event):
         if event.type() == QtCore.QEvent.Type.ToolTip:
@@ -195,7 +199,7 @@ class PathListWidget(QtWidgets.QListWidget):
         if item is None:
             QtWidgets.QToolTip.hideText()
         else:
-            QtWidgets.QToolTip.showText(global_position, item.toolTip(),
+            QtWidgets.QToolTip.showText(global_position, item.toolTip(0),
                                        self.viewport(), self.visualItemRect(item))
 
 
@@ -234,30 +238,89 @@ class FileManagementWidget(QtWidgets.QWidget):
         self._input.setMinimumWidth(0)
 
     def _init_list(self):
-        def _callback(item: QtWidgets.QListWidgetItem):
-            self._parent.set_current_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
+        self._list = PathTreeWidget()
+        self._folder_items = {}
+        self._image_items = []
+        self._tree_root = None
+        self._list.itemClicked.connect(self._item_clicked)
+        self._list.itemExpanded.connect(lambda item: self._set_folder_icon(item, True))
+        self._list.itemCollapsed.connect(lambda item: self._set_folder_icon(item, False))
 
-        self._list = PathListWidget()
-        self._list.itemClicked.connect(_callback)
+    def _set_folder_icon(self, item, expanded):
+        if item.data(0, QtCore.Qt.ItemDataRole.UserRole) not in self._folder_items:
+            return
+        icon = (QtWidgets.QStyle.StandardPixmap.SP_DirOpenIcon if expanded
+                else QtWidgets.QStyle.StandardPixmap.SP_DirClosedIcon)
+        item.setIcon(0, self.style().standardIcon(icon))
+
+    def _item_clicked(self, item, _column):
+        path = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+        if path in self._folder_items:
+            item.setExpanded(not item.isExpanded())
+        else:
+            self._parent.set_current_image(path)
 
     def _update_list(self):
+        same_root = self._tree_root == self._selected_folder
+        expanded = {path for path, item in self._folder_items.items() if item.isExpanded()}
+        selected = self._list.currentItem()
+        selected_path = selected.data(0, QtCore.Qt.ItemDataRole.UserRole) if selected else None
         self._list.clear()
+        self._folder_items = {}
+        self._image_items = []
+        self._tree_root = self._selected_folder
+        file_icon = self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_FileIcon)
 
-        for file in self._selected_folder.rglob('*'):
-            if not file.is_file() or file.suffix.lower() not in DISPLAYED_IMAGE_FORMATS:
-                continue
-            filename = file.relative_to(self._selected_folder)
-            item = QtWidgets.QListWidgetItem(str(filename))
-            item.setData(QtCore.Qt.ItemDataRole.UserRole, file)
-            item.setToolTip(f'<qt>{escape(str(file.resolve()))}</qt>')
-            self._list.addItem(item)
+        def add_folder(folder, parent):
+            item = QtWidgets.QTreeWidgetItem(parent, [folder.name or str(folder)])
+            item.setData(0, QtCore.Qt.ItemDataRole.UserRole, folder)
+            item.setToolTip(0, f'<qt>{escape(str(folder.absolute()))}</qt>')
+            self._folder_items[folder] = item
+            self._set_folder_icon(item, False)
+            font = item.font(0)
+            font.setWeight(QtGui.QFont.Weight.DemiBold)
+            item.setFont(0, font)
+            if not folder.is_symlink() or folder == self._selected_folder:
+                try:
+                    entries = sorted(folder.iterdir(), key=lambda path:
+                                     (not path.is_dir(), path.name.casefold(), path.name))
+                except OSError as error:
+                    item.setToolTip(0, f'<qt>{escape(str(folder.absolute()))}<br>{escape(str(error))}</qt>')
+                    entries = []
+                for path in entries:
+                    if path.is_dir():
+                        add_folder(path, item)
+                    elif path.is_file() and path.suffix.lower() in DISPLAYED_IMAGE_FORMATS:
+                        child = QtWidgets.QTreeWidgetItem(item, [path.name])
+                        child.setData(0, QtCore.Qt.ItemDataRole.UserRole, path)
+                        child.setToolTip(0, f'<qt>{escape(str(path.absolute()))}</qt>')
+                        child.setIcon(0, file_icon)
+                        self._image_items.append(child)
+            item.setExpanded(folder in expanded if same_root else folder == self._selected_folder)
+            return item
+
+        add_folder(self._selected_folder, self._list)
+        if same_root and selected_path is not None:
+            for item in [*self._folder_items.values(), *self._image_items]:
+                if item.data(0, QtCore.Qt.ItemDataRole.UserRole) == selected_path:
+                    self._list.setCurrentItem(item)
+                    break
         self.update_width_limit()
 
     def update_width_limit(self):
         self.ensurePolished()
-        # Delegate hints include item styling; reserve room for a scrollbar
-        # so adding more files never makes the longest filename clip.
-        list_width = (max(0, self._list.sizeHintForColumn(0)) + 2 * self._list.frameWidth()
+        option = QtWidgets.QStyleOptionViewItem()
+        option.initFrom(self._list)
+        content_width = 0
+        for item in [*self._folder_items.values(), *self._image_items]:
+            depth = 1
+            ancestor = item.parent()
+            while ancestor is not None:
+                depth += 1
+                ancestor = ancestor.parent()
+            hint = self._list.itemDelegate().sizeHint(option, self._list.indexFromItem(item))
+            content_width = max(content_width, hint.width() + depth * self._list.indentation())
+        list_width = (content_width + 2 * self._list.frameWidth()
                       + self._list.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent))
         margins = self._layout.contentsMargins()
         width = (max(self._input.sizeHint().width(), list_width)
@@ -272,19 +335,24 @@ class FileManagementWidget(QtWidgets.QWidget):
         self.setLayout(self._layout)
 
     def select_image(self, image: pathlib.Path):
-        for row in range(self._list.count()):
-            item = self._list.item(row)
-            if item.data(QtCore.Qt.ItemDataRole.UserRole) == image:
+        for row, item in enumerate(self._image_items):
+            if item.data(0, QtCore.Qt.ItemDataRole.UserRole) == image:
+                ancestor = item.parent()
+                while ancestor is not None:
+                    ancestor.setExpanded(True)
+                    ancestor = ancestor.parent()
                 self._list.setCurrentItem(item)
                 self._list.scrollToItem(item)
                 return row
         return None
 
     def select_next_image(self, image: pathlib.Path):
-        row = self.select_image(image)
-        if row is not None and row + 1 < self._list.count():
-            item = self._list.item(row + 1)
-            self._parent.set_current_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
+        for row, item in enumerate(self._image_items):
+            if item.data(0, QtCore.Qt.ItemDataRole.UserRole) == image:
+                if row + 1 < len(self._image_items):
+                    next_item = self._image_items[row + 1]
+                    self._parent.set_current_image(next_item.data(0, QtCore.Qt.ItemDataRole.UserRole))
+                return
 
 
 class ImageDisplayWidget(QtWidgets.QLabel):

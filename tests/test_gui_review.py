@@ -26,8 +26,8 @@ def check_review_gui():
                 Image.new('RGB', (24, 16), 'red').save(self.root / name)
             self.widget = self.open_window(self.root)
             listing = self.widget.file_management._list
-            self.paths = [listing.item(i).data(QtCore.Qt.ItemDataRole.UserRole)
-                          for i in range(listing.count())]
+            self.paths = [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                          for item in self.widget.file_management._image_items]
 
         def open_window(self, root):
             widget = MainWidget()
@@ -72,7 +72,8 @@ def check_review_gui():
             self.widget.set_current_image(first)
             self.press_x()
             self.assertEqual(self.widget.image_path, second)
-            self.assertEqual(self.widget.file_management._list.currentRow(), 1)
+            self.assertIs(self.widget.file_management._list.currentItem(),
+                          self.widget.file_management._image_items[1])
             self.assertFalse(self.widget.metadata.deletion_checkbox.isChecked())
             self.assertEqual(read_deletion_marks(self.root), {review_path(self.root, first)})
             self.press_x()

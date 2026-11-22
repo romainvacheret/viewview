@@ -28,7 +28,9 @@ FileManagementWidget {
     margin: 8px 8px 0px 8px;
 }
 
-QListWidget {
+PathTreeWidget {
+    color: #b9c5d3;
+    show-decoration-selected: 0;
     background-color: #191f28;
     border: 1px solid #2b3441;
     border-radius: 9px;
@@ -36,7 +38,7 @@ QListWidget {
     outline: 0;
 }
 
-QListWidget::item {
+PathTreeWidget::item {
     color: #b9c5d3;
     background-color: transparent;
     border: 1px solid transparent;
@@ -45,25 +47,25 @@ QListWidget::item {
     margin: 2px 0px;
 }
 
-QListWidget::item:hover {
+PathTreeWidget::item:hover {
     color: #f0f5fa;
     background-color: #242e3b;
     border-color: #354255;
 }
 
-QListWidget::item:selected {
+PathTreeWidget::item:selected {
     color: #e6fff9;
     background-color: #223e43;
     border-color: #43887f;
 }
 
-QListWidget::item:selected:!active {
+PathTreeWidget::item:selected:!active {
     color: #d2e8e4;
     background-color: #263a40;
     border-color: #3b5b60;
 }
 
-QListWidget::item:focus {
+PathTreeWidget::item:focus {
     border-color: #68b6a7;
 }
 

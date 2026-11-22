@@ -112,7 +112,7 @@ def check_import_gui():
             self.assertTrue((self.source / 'new.jpg').exists())
             self.assertTrue((self.destination / '2026/07/02/new.jpg').exists())
             self.assertTrue((self.destination / '_undated/undated.png').exists())
-            self.assertEqual(self.widget.file_management._list.count(), 3)
+            self.assertEqual(len(self.widget.file_management._image_items), 3)
             self.assertIn('Copied 2 files', self.importer.result_label.text())
             paths = ['2026/07/01/existing.jpg', '2026/07/02/new.jpg', '_undated/undated.png']
             self.assertEqual(json.loads((self.destination / 'tags.json').read_text()),

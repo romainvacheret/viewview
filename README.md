@@ -3,6 +3,9 @@
 The GUI displays JPEG (`.jpg`, `.jpeg`), PNG, and HEIC/HEIF pictures, including
 uppercase extensions and pictures in subdirectories. HEIC/HEIF decoding uses
 `pillow-heif` (libheif), included in the Nix shell and pip requirements.
+The left panel shows a folder tree: click a folder or its arrow to expand or
+collapse it, and click a picture to display it. Full-path tooltips remain
+available for folders and pictures.
 
 In the Viewer tab, the right panel's **To be deleted** checkbox saves a review
 mark without deleting the file. Press **X** to toggle the current picture's mark and

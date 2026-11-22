@@ -11,7 +11,7 @@ import sys
 def check_images():
     from PIL import Image
     from PIL.ExifTags import Base, IFD
-    from PySide6 import QtWidgets
+    from PySide6 import QtCore, QtTest, QtWidgets
 
     from viewview.gui import MainWidget, MetadataHandler
 
@@ -20,6 +20,77 @@ def check_images():
         @classmethod
         def setUpClass(cls):
             cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
+
+        def test_folder_tree_hierarchy_clicks_refresh_and_navigation(self):
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                nested = root / '2026' / '07'
+                nested.mkdir(parents=True)
+                (root / 'empty').mkdir()
+                first = nested / 'first.jpg'
+                second = root / 'last.jpg'
+                for path in (first, second):
+                    Image.new('RGB', (24, 16), 'red').save(path)
+                (root / 'notes.txt').write_text('Not an image')
+                widget = MainWidget()
+                self.addCleanup(widget.close)
+                widget.resize(1200, 800)
+                widget.show()
+                panel = widget.file_management
+                panel._selected_folder = root
+                panel._update_list()
+                self.app.processEvents()
+                tree = panel._list
+                root_item = tree.topLevelItem(0)
+                year = panel._folder_items[root / '2026']
+                month = panel._folder_items[nested]
+                self.assertEqual(tree.topLevelItemCount(), 1)
+                self.assertIs(year.parent(), root_item)
+                self.assertIs(month.parent(), year)
+                self.assertIs(panel._image_items[0].parent(), month)
+                self.assertEqual(panel._image_items[0].text(0), 'first.jpg')
+                self.assertIn(root / 'empty', panel._folder_items)
+                self.assertEqual(len(panel._image_items), 2)
+                self.assertTrue(root_item.isExpanded())
+                self.assertFalse(year.isExpanded())
+
+                def click(item):
+                    QtTest.QTest.mouseClick(tree.viewport(), QtCore.Qt.MouseButton.LeftButton,
+                                           pos=tree.visualItemRect(item).center())
+                    self.app.processEvents()
+
+                click(year)
+                self.assertTrue(year.isExpanded())
+                click(month)
+                self.assertTrue(month.isExpanded())
+                click(panel._image_items[0])
+                self.assertEqual(widget.image_path, first)
+                click(year)
+                self.assertFalse(year.isExpanded())
+                self.assertEqual(widget.image_path, first)
+
+                # The native disclosure arrow must toggle once, just like the label.
+                rect = tree.visualItemRect(year)
+                arrow = QtCore.QPoint(rect.left() - tree.indentation() // 2, rect.center().y())
+                QtTest.QTest.mouseClick(tree.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=arrow)
+                self.app.processEvents()
+                self.assertTrue(year.isExpanded())
+                panel._update_list()
+                self.assertTrue(panel._folder_items[root / '2026'].isExpanded())
+                self.assertTrue(panel._folder_items[nested].isExpanded())
+                panel._folder_items[root / '2026'].setExpanded(False)
+                panel._update_list()
+                self.assertFalse(panel._folder_items[root / '2026'].isExpanded())
+                panel.select_next_image(first)
+                self.assertEqual(widget.image_path, second)
+                self.assertIs(tree.currentItem(), panel._image_items[1])
+                self.assertFalse(panel._folder_items[root / '2026'].isExpanded())
+                file_icons = [item.icon(0).cacheKey() for item in panel._image_items]
+                tree.expandAll()
+                self.assertEqual([item.icon(0).cacheKey() for item in panel._image_items], file_icons)
+                widget._splitter.set_panel_sizes([panel.maximumWidth(), 700, widget.metadata.width()])
+                self.app.processEvents()
+                self.assertEqual(tree.horizontalScrollBar().maximum(), 0)
 
         def test_supported_images_display_with_metadata(self):
             with tempfile.TemporaryDirectory() as temporary:
@@ -73,7 +144,8 @@ def check_images():
                 widget.file_management._update_list()
                 listing = widget.file_management._list
                 self.assertEqual(
-                    {listing.item(i).text() for i in range(listing.count())},
+                    {str(item.data(0, QtCore.Qt.ItemDataRole.UserRole).relative_to(root))
+                     for item in widget.file_management._image_items},
                     {str(path.relative_to(root)) for path in root.rglob('*')
                      if path.is_file() and path.suffix.lower() in
                      {'.jpg', '.jpeg', '.png', '.heic', '.heif'}},

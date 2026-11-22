@@ -163,7 +163,7 @@ def check_splitter():
                 limit = panel.maximumWidth()
                 text_width = panel._list.fontMetrics().horizontalAdvance(longest_name)
                 self.assertGreater(limit, text_width)
-                self.assertLess(limit, text_width + 120)
+                self.assertLess(limit, text_width + 160)
                 opposite = self.splitter.sizes()[2]
                 self.drag(1, 3000)
                 self.assertEqual(panel.width(), limit)
@@ -222,17 +222,17 @@ def check_splitter():
                 self.assertIn(str(root), panel._input.toolTip())
                 listing = panel._list
                 viewport = listing.viewport()
-                first = listing.visualItemRect(listing.item(0)).center()
+                first = listing.visualItemRect(panel._image_items[0]).center()
                 help_event = QtGui.QHelpEvent(QtCore.QEvent.Type.ToolTip, first,
                                              viewport.mapToGlobal(first))
                 app.sendEvent(viewport, help_event)
                 self.assertTrue(QtWidgets.QToolTip.isVisible())
-                self.assertIn(escape(str(root / listing.item(0).text())), QtWidgets.QToolTip.text())
+                self.assertIn(escape(str(root / panel._image_items[0].text(0))), QtWidgets.QToolTip.text())
 
-                second = listing.visualItemRect(listing.item(1)).center()
+                second = listing.visualItemRect(panel._image_items[1]).center()
                 QtTest.QTest.mouseMove(viewport, second)
                 app.processEvents()
-                self.assertIn(escape(str(root / listing.item(1).text())), QtWidgets.QToolTip.text())
+                self.assertIn(escape(str(root / panel._image_items[1].text(0))), QtWidgets.QToolTip.text())
 
                 QtTest.QTest.mouseMove(viewport, QtCore.QPoint(5, viewport.height() - 5))
                 QtTest.QTest.qWait(400)
