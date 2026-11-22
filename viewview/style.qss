@@ -1,39 +1,207 @@
-QListWidget {
-    border-radius: 10px;
-    border: 5px solid #2c2c2e;
-    background: #2c2c2e;
-    font-family: "Comic Sans MS";
+/* Graphite surfaces keep the photograph at the center of attention. */
+QWidget {
+    font-family: "Inter", "Noto Sans", "DejaVu Sans", sans-serif;
+    font-size: 13px;
+    selection-background-color: #244b50;
+    selection-color: #effffc;
 }
 
-QListWidget::item {
-    background: #1f1f21;
-    padding: 7px 5px;
-    border: 1px solid #2c2c2e;
-    border-radius: 5px;
-}
-
-QListWidget::item:hover {
-    background: #2c2c2e;
-    border: 1px solid #1f1f21;
-}
-
-#filemanager-input {
-    font-family: "Comic Sans MS";
-    font-size: 14px;
-    font-weight: bold;
-    padding: 7px 7px;
+MainWidget {
+    color: #e3e9f0;
+    background-color: #11151b;
 }
 
 FileManagementWidget {
-    border-radius: 5px;
-    padding: 5px;
+    background-color: #191f28;
+    border: 1px solid #2b3441;
+    border-radius: 10px;
 }
 
-QLabel[role="title"] {
-    font-weight: bold;
-    font-size: 13px;
+#filemanager-input {
+    color: #c5d1de;
+    background-color: #202936;
+    border: 1px solid #303d4e;
+    border-radius: 7px;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 12px;
+    margin: 8px 8px 0px 8px;
+}
+
+QListWidget {
+    background-color: #191f28;
+    border: 1px solid #2b3441;
+    border-radius: 9px;
+    padding: 6px;
+    outline: 0;
+}
+
+QListWidget::item {
+    color: #b9c5d3;
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 2px 0px;
+}
+
+QListWidget::item:hover {
+    color: #f0f5fa;
+    background-color: #242e3b;
+    border-color: #354255;
+}
+
+QListWidget::item:selected {
+    color: #e6fff9;
+    background-color: #223e43;
+    border-color: #43887f;
+}
+
+QListWidget::item:selected:!active {
+    color: #d2e8e4;
+    background-color: #263a40;
+    border-color: #3b5b60;
+}
+
+QListWidget::item:focus {
+    border-color: #68b6a7;
+}
+
+ImageDisplayWidget {
+    background-color: #0d1117;
+    border: 1px solid #29323e;
+    border-radius: 10px;
+}
+
+MetadataWidget {
+    background-color: #191f28;
+    border: 1px solid #2b3441;
+    border-radius: 10px;
+    padding: 14px 10px;
+    margin: 0px;
 }
 
 MetadataWidget QLabel {
-    font-family: "Comic Sans MS";
+    background-color: transparent;
+    border: none;
+    padding: 7px 4px;
+}
+
+QLabel[role="title"] {
+    color: #8f9eaf;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+QLabel[role="description"] {
+    color: #e3e9f0;
+    font-size: 13px;
+    font-weight: 400;
+}
+
+ToggleSplitter::handle {
+    background: #344153;
+    width: 12px;
+    margin: 8px 2px;
+    border: 1px solid #344153;
+    border-radius: 4px;
+}
+
+ToggleSplitter::handle:hover {
+    background: #425063;
+}
+
+ToggleSplitter::handle:pressed {
+    background: #425063;
+}
+
+/* Keep every part of the Qt file chooser on a consistent dark palette. */
+QFileDialog {
+    color: #e3e9f0;
+    background-color: #191f28;
+}
+
+QFileDialog QWidget {
+    color: #e3e9f0;
+    background-color: #191f28;
+}
+
+QFileDialog QAbstractItemView, QFileDialog QLineEdit, QFileDialog QComboBox {
+    color: #e3e9f0;
+    background-color: #11151b;
+    border: 1px solid #425063;
+    border-radius: 5px;
+    selection-background-color: #244b50;
+    selection-color: #effffc;
+}
+
+QFileDialog QLineEdit, QFileDialog QComboBox {
+    padding: 6px;
+}
+
+QFileDialog QPushButton, QFileDialog QToolButton, QFileDialog QHeaderView::section {
+    color: #e3e9f0;
+    background-color: #263241;
+    border: 1px solid #425063;
+    border-radius: 4px;
+    padding: 6px 10px;
+}
+
+QFileDialog QPushButton:hover, QFileDialog QToolButton:hover {
+    background-color: #34485a;
+    border-color: #68b6a7;
+}
+
+QFileDialog QPushButton:disabled, QFileDialog QToolButton:disabled {
+    color: #8390a1;
+    background-color: #202936;
+}
+
+QScrollBar:vertical {
+    background-color: #191f28;
+    width: 10px;
+    margin: 3px 1px;
+    border: none;
+}
+
+QScrollBar:horizontal {
+    background-color: #191f28;
+    height: 10px;
+    margin: 1px 3px;
+    border: none;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #425063;
+    min-height: 28px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal {
+    background-color: #425063;
+    min-width: 28px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:hover {
+    background-color: #61758c;
+}
+
+QScrollBar::add-line, QScrollBar::sub-line {
+    width: 0px;
+    height: 0px;
+    border: none;
+    background: transparent;
+}
+
+QScrollBar::add-page, QScrollBar::sub-page {
+    background: transparent;
+}
+
+QToolTip {
+    color: #e3e9f0;
+    background-color: #202936;
+    border: 1px solid #425063;
+    border-radius: 5px;
+    padding: 6px 9px;
 }

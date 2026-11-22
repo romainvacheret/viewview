@@ -210,6 +210,7 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
     def __init__(self, orientation: QtCore.Qt.Orientation, 
                  parent: QtWidgets.QSplitter) -> None:
         super().__init__(orientation, parent)
+        self.setToolTip('Click to collapse or expand the panel. Drag to resize.')
         # TODO: choose default
         self._saved_size = 300
         self._saved_pos = None
@@ -287,6 +288,7 @@ class MainWidget(QtWidgets.QWidget):
         self.metadata = MetadataWidget(self)
 
         self._splitter = ToggleSplitter(QtCore.Qt.Orientation.Horizontal)
+        self._splitter.setHandleWidth(12)
         self._splitter.addWidget(self.file_management)
         self._splitter.addWidget(self.image_display)
         self._splitter.addWidget(self.metadata)
