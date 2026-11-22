@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viewview"
+version = "0.1.0"
+description = "Browse and organize a photo library"
+requires-python = ">=3.11"
+dependencies = ["PySide6", "Pillow", "pillow-heif", "ExifRead", "hachoir"]
+
+[project.scripts]
+viewview = "viewview.launcher:main"
+
+[tool.setuptools.packages.find]
+include = ["viewview*"]
+
+[tool.setuptools.package-data]
+viewview = ["style.qss"]

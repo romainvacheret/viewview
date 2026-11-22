@@ -1,0 +1,56 @@
+name: Build portable applications
+
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-22.04
+            artifact: Viewview-linux-x86_64
+          - name: macOS Apple Silicon
+            runner: macos-15
+            artifact: Viewview-macos-arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - name: Check native architecture
+        run: |
+          if [ "$RUNNER_OS" = macOS ]; then
+            test "$(uname -m)" = arm64
+          fi
+      - name: Test application
+        run: nix develop path:. --command python -m unittest discover -s tests -v
+      - name: Build portable application
+        run: nix build path:.#bundle -L
+      - name: Check and prepare Linux artifact
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist
+          cp -L result dist/Viewview-linux-x86_64.AppImage
+          chmod +x dist/Viewview-linux-x86_64.AppImage
+          APPIMAGE_EXTRACT_AND_RUN=1 dist/Viewview-linux-x86_64.AppImage --smoke-test
+      - name: Check and prepare macOS artifact
+        if: runner.os == 'macOS'
+        run: |
+          env -u PYTHONPATH -u QT_PLUGIN_PATH -u QT_QPA_PLATFORM_PLUGIN_PATH \
+            result/Viewview.app/Contents/MacOS/Viewview --smoke-test
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent result/Viewview.app dist/Viewview-macos-arm64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/*
+          if-no-files-found: error
