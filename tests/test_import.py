@@ -80,6 +80,20 @@ class ImportTests(unittest.TestCase):
         import_images(self.source, self.destination, tag='Preview', dry_run=True)
         self.assertEqual((self.destination / 'tags.json').read_bytes(), before)
 
+    def test_multiple_tags_are_validated_and_written_together(self):
+        image = self.image('a', b'abc')
+        import_images(self.source, self.destination, tags=['Summer holiday', 'family'], dry_run=True)
+        self.assertFalse(self.destination.exists())
+        with self.assertRaisesRegex(ValueError, 'Tag must not be empty'):
+            import_images(self.source, self.destination, tags=['family', '  '], move=True)
+        self.assertTrue(image.exists())
+        import_images(self.source, self.destination, tags=['Summer holiday', 'family', 'family'], move=True)
+        self.assertFalse(image.exists())
+        self.assertEqual(json.loads((self.destination / 'tags.json').read_text()), {
+            'Summer holiday': ['2026/11/02/photo.JPG'],
+            'family': ['2026/11/02/photo.JPG'],
+        })
+
     def test_invalid_tags_fail_before_moving_files(self):
         image = self.image('a', b'abc')
         self.destination.mkdir()

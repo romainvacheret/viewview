@@ -13,6 +13,8 @@ from pillow_heif import register_heif_opener
 
 from PySide6 import QtCore, QtWidgets, QtGui
 
+from .import_gui import ImportWidget
+
 register_heif_opener()
 
 HEIF_IMAGE_FORMATS = {'.heic', '.heif'}
@@ -175,6 +177,8 @@ class PathListWidget(QtWidgets.QListWidget):
 
 
 class FileManagementWidget(QtWidgets.QWidget):
+    folder_selected = QtCore.Signal(object)
+
     def __init__(self, parent: 'MainWidget'):
         super().__init__(parent)
         self._parent = parent
@@ -186,11 +190,15 @@ class FileManagementWidget(QtWidgets.QWidget):
 
     def select_folder(self):
         self._browser = QtWidgets.QFileDialog(self, 'Select folder')
-        self._selected_folder = pathlib.Path(self._browser.getExistingDirectory())
+        folder = self._browser.getExistingDirectory()
+        if not folder:
+            return
+        self._selected_folder = pathlib.Path(folder)
 
         self._input.setText(str(self._selected_folder))
         self._input.setToolTip(f'<qt>{escape(str(self._selected_folder.resolve()))}</qt>')
         self._update_list()
+        self.folder_selected.emit(self._selected_folder)
 
         # QtWidgets.QWidget objects don't print their style by default
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -392,9 +400,16 @@ class MainWidget(QtWidgets.QWidget):
         # Dragging stops at minimum widths; only clicking collapses panels.
         self._splitter.setChildrenCollapsible(False)
 
-        self._layout = QtWidgets.QHBoxLayout(self) 
+        self.import_widget = ImportWidget()
+        self.file_management.folder_selected.connect(self.import_widget.set_destination)
+        self.import_widget.imported.connect(self._refresh_library)
+        self.tabs = QtWidgets.QTabWidget()
+        self.tabs.addTab(self._splitter, 'Viewer')
+        self.tabs.addTab(self.import_widget, 'Import')
+
+        self._layout = QtWidgets.QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self._layout.addWidget(self._splitter)
+        self._layout.addWidget(self.tabs)
         self.setLayout(self._layout)
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:
@@ -418,6 +433,17 @@ class MainWidget(QtWidgets.QWidget):
         close_action.triggered.connect(self.close)
 
         self.addAction(close_action)
+
+    def _refresh_library(self):
+        if hasattr(self.file_management, '_selected_folder'):
+            self.file_management._update_list()
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        if self.import_widget.is_busy:
+            self.import_widget.result_label.setText('Please wait for the current import check or operation to finish before closing.')
+            event.ignore()
+        else:
+            super().closeEvent(event)
 
     def select_folder(self):
         self.file_management.select_folder()

@@ -205,3 +205,107 @@ QToolTip {
     border-radius: 5px;
     padding: 6px 9px;
 }
+
+/* Tabs and import controls share the viewer's graphite palette. */
+QTabWidget::pane {
+    border: none;
+    background-color: #11151b;
+}
+
+QTabBar::tab {
+    color: #9eacbc;
+    background-color: #191f28;
+    border: 1px solid #2b3441;
+    border-bottom: 2px solid transparent;
+    padding: 10px 24px;
+    margin-right: 3px;
+}
+
+QTabBar::tab:selected {
+    color: #e6fff9;
+    background-color: #202936;
+    border-bottom-color: #68b6a7;
+}
+
+QTabBar::tab:hover {
+    color: #effffc;
+    background-color: #263241;
+}
+
+ImportWidget {
+    background-color: #11151b;
+}
+
+ImportWidget QLabel {
+    color: #b9c5d3;
+    background: transparent;
+}
+
+#import-title {
+    color: #e3e9f0;
+    font-size: 22px;
+    font-weight: 600;
+}
+
+#import-preview-title {
+    color: #e3e9f0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+ImportWidget QLineEdit, ImportWidget QPlainTextEdit, ImportWidget QTreeWidget {
+    color: #e3e9f0;
+    background-color: #191f28;
+    alternate-background-color: #1e2733;
+    border: 1px solid #344153;
+    border-radius: 6px;
+    padding: 8px;
+    selection-color: #effffc;
+    selection-background-color: #244b50;
+}
+
+ImportWidget QLineEdit:focus {
+    border-color: #68b6a7;
+}
+
+ImportWidget QLineEdit:read-only {
+    color: #aebdcd;
+    background-color: #151b23;
+}
+
+ImportWidget QHeaderView::section {
+    color: #b9c5d3;
+    background-color: #263241;
+    border: none;
+    border-bottom: 1px solid #425063;
+    padding: 8px;
+}
+
+ImportWidget QTreeWidget::item {
+    padding: 6px 4px;
+}
+
+ImportWidget QPushButton {
+    color: #cbd8e5;
+    background-color: #263241;
+    border: 1px solid #425063;
+    border-radius: 6px;
+    padding: 8px 16px;
+}
+
+ImportWidget QPushButton:hover {
+    background-color: #34485a;
+    border-color: #68b6a7;
+}
+
+ImportWidget QPushButton:checked, #import-action {
+    color: #e6fff9;
+    background-color: #244b50;
+    border-color: #43887f;
+}
+
+ImportWidget QPushButton:disabled {
+    color: #778697;
+    background-color: #191f28;
+    border-color: #2b3441;
+}

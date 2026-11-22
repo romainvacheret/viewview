@@ -14,6 +14,19 @@ Or enter the environment with `nix develop path:.` and run `python -m viewview`.
 The shell uses Python packages from the nixpkgs revision pinned in `flake.lock`;
 their versions may differ from the pip pins in `requirements.txt`.
 
+The GUI has **Viewer** and **Import** tabs. The folder opened in the viewer is
+the destination library root. In Import, choose a source folder, select Copy or
+Move, and optionally enter comma-separated tags, such as `Summer holiday, family`.
+Spaces around commas are removed; spaces inside a tag are preserved.
+
+The automatic preview checks the same files and permissions as the CLI dry run.
+Its folder tree shows existing media, additions, resulting totals, and folders
+to create; year and month counts include their descendants. Duplicate files,
+invalid media, and warnings appear below the tree. Only **Import** copies or
+moves files. Results are rechecked when importing; a JSON report is saved in the
+library, and the viewer and preview refresh afterward. Identical files are
+skipped, including in Move mode, but still receive the requested tags.
+
 Import images and MOV videos into folders by recording date:
 
 ```sh
