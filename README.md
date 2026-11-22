@@ -1,5 +1,15 @@
 # Viewview
 
+Run the GUI with its dependencies provided by Nix:
+
+```sh
+nix develop path:. --command python -m viewview
+```
+
+Or enter the environment with `nix develop path:.` and run `python -m viewview`.
+The shell uses Python packages from the nixpkgs revision pinned in `flake.lock`;
+their versions may differ from the pip pins in `requirements.txt`.
+
 Import images and MOV videos into folders by recording date:
 
 ```sh
