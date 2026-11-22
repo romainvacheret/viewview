@@ -14,6 +14,7 @@ from pillow_heif import register_heif_opener
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from .import_gui import ImportWidget
+from .core.review import read_deletion_marks, review_path, set_deletion_mark
 
 register_heif_opener()
 
@@ -115,6 +116,28 @@ class MetadataWidget(QtWidgets.QGroupBox):
         self._layout.addRow(software_title, self._softwarew)
         self._layout.addRow(copyright_title, self._copyrightw)
         self._layout.addRow(dimension_title, self._dimensionw)
+        self.deletion_checkbox = QtWidgets.QCheckBox('To be deleted')
+        self.deletion_checkbox.setEnabled(False)
+        self.deletion_checkbox.setToolTip('Press X to toggle the deletion mark and advance.')
+        self.deletion_checkbox.clicked.connect(parent.set_deletion_mark)
+        self.review_error = QtWidgets.QLabel()
+        self.review_error.setObjectName('review-error')
+        self.review_error.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.review_error.setWordWrap(True)
+        self.review_error.hide()
+        review = QtWidgets.QWidget()
+        review_layout = QtWidgets.QVBoxLayout(review)
+        review_layout.setContentsMargins(0, 0, 0, 0)
+        review_layout.addWidget(self.deletion_checkbox)
+        review_layout.addWidget(self.review_error)
+        self._layout.addRow(_init_label('Review', 'title'), review)
+
+    def set_review_state(self, marked: bool, enabled: bool, error: str = ''):
+        self.deletion_checkbox.setChecked(marked)
+        self.deletion_checkbox.setEnabled(enabled)
+        self.review_error.setText(error)
+        self.review_error.setVisible(bool(error))
+        self.update_width_limit()
 
     def update_info(self, image_path: pathlib.Path):
         print(image_path)
@@ -247,6 +270,21 @@ class FileManagementWidget(QtWidgets.QWidget):
         self._layout.addWidget(self._input)
         self._layout.addWidget(self._list)
         self.setLayout(self._layout)
+
+    def select_image(self, image: pathlib.Path):
+        for row in range(self._list.count()):
+            item = self._list.item(row)
+            if item.data(QtCore.Qt.ItemDataRole.UserRole) == image:
+                self._list.setCurrentItem(item)
+                self._list.scrollToItem(item)
+                return row
+        return None
+
+    def select_next_image(self, image: pathlib.Path):
+        row = self.select_image(image)
+        if row is not None and row + 1 < self._list.count():
+            item = self._list.item(row + 1)
+            self._parent.set_current_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
 
 
 class ImageDisplayWidget(QtWidgets.QLabel):
@@ -383,6 +421,7 @@ class MainWidget(QtWidgets.QWidget):
         self._initial_sizes_set = False
 
         self.image_path: Optional[pathlib.Path] = None
+        self._marked_for_deletion = False
 
         self.image_display = ImageDisplayWidget()
         self.file_management = FileManagementWidget(self)
@@ -402,10 +441,16 @@ class MainWidget(QtWidgets.QWidget):
 
         self.import_widget = ImportWidget()
         self.file_management.folder_selected.connect(self.import_widget.set_destination)
+        self.file_management.folder_selected.connect(self._library_changed)
         self.import_widget.imported.connect(self._refresh_library)
         self.tabs = QtWidgets.QTabWidget()
         self.tabs.addTab(self._splitter, 'Viewer')
         self.tabs.addTab(self.import_widget, 'Import')
+        self._mark_shortcut = QtGui.QShortcut(QtGui.QKeySequence('X'), self)
+        self._mark_shortcut.setAutoRepeat(False)
+        self._mark_shortcut.activated.connect(self.mark_and_advance)
+        self._mark_shortcut.setEnabled(False)
+        self.tabs.currentChanged.connect(self._update_mark_shortcut)
 
         self._layout = QtWidgets.QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -452,6 +497,51 @@ class MainWidget(QtWidgets.QWidget):
         self.image_path = image
         self.image_display.display_image(image)
         self.metadata.update_info(image)
+        self.file_management.select_image(image)
+        self._load_review_state()
+
+    def _library_changed(self, _folder):
+        self.image_path = None
+        self.image_display.clear()
+        self._marked_for_deletion = False
+        self.metadata.set_review_state(False, False)
+        self._update_mark_shortcut()
+
+    def _update_mark_shortcut(self, *_):
+        self._mark_shortcut.setEnabled(self.tabs.currentIndex() == 0
+                                      and self.metadata.deletion_checkbox.isEnabled())
+
+    def _load_review_state(self):
+        library = getattr(self.file_management, '_selected_folder', None)
+        self._marked_for_deletion = False
+        enabled = library is not None and self.image_path is not None
+        error = ''
+        if enabled:
+            try:
+                self._marked_for_deletion = review_path(library, self.image_path) in read_deletion_marks(library)
+            except (OSError, ValueError) as failure:
+                enabled = False
+                error = f'Could not load review marks: {failure}'
+        self.metadata.set_review_state(self._marked_for_deletion, enabled, error)
+        self._update_mark_shortcut()
+
+    def set_deletion_mark(self, marked: bool) -> bool:
+        library = getattr(self.file_management, '_selected_folder', None)
+        if library is None or self.image_path is None or not self.metadata.deletion_checkbox.isEnabled():
+            return False
+        try:
+            set_deletion_mark(library, self.image_path, marked)
+        except (OSError, ValueError) as failure:
+            self.metadata.set_review_state(self._marked_for_deletion, True,
+                                           f'Could not save review mark: {failure}')
+            return False
+        self._marked_for_deletion = marked
+        self.metadata.set_review_state(marked, True)
+        return True
+
+    def mark_and_advance(self):
+        if self.tabs.currentIndex() == 0 and self.set_deletion_mark(not self._marked_for_deletion):
+            self.file_management.select_next_image(self.image_path)
 
 
 def main() -> int:

@@ -4,6 +4,12 @@ The GUI displays JPEG (`.jpg`, `.jpeg`), PNG, and HEIC/HEIF pictures, including
 uppercase extensions and pictures in subdirectories. HEIC/HEIF decoding uses
 `pillow-heif` (libheif), included in the Nix shell and pip requirements.
 
+In the Viewer tab, the right panel's **To be deleted** checkbox saves a review
+mark without deleting the file. Press **X** to toggle the current picture's mark and
+select the next picture; on the last picture, it stays selected. Uncheck the box
+to remove a mark. Marks reload when selecting pictures after reopening a library
+and are stored as relative paths in `review.json` beside `tags.json`.
+
 Run the GUI with its dependencies provided by Nix:
 
 ```sh
