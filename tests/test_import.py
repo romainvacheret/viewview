@@ -57,6 +57,52 @@ class ImportTests(unittest.TestCase):
         import_images(self.source, self.destination)
         self.assertTrue((self.destination / '_undated/photo.JPG').is_file())
 
+    def test_tags_merge_deduplicate_and_preserve_other_tags(self):
+        self.image('a', b'abc')
+        self.image('b', b'xyz')
+        import_images(self.source, self.destination, tag='Holiday')
+        import_images(self.source, self.destination, tag='Favorites')
+        self.image('c', b'new')
+        import_images(self.source, self.destination, tag='Holiday', move=True)
+        tags = json.loads((self.destination / 'tags.json').read_text())
+        self.assertEqual(tags, {
+            'Holiday': ['2026/11/02/photo.JPG', '2026/11/02/photo_1.JPG',
+                        '2026/11/02/photo_2.JPG'],
+            'Favorites': ['2026/11/02/photo.JPG', '2026/11/02/photo_1.JPG'],
+        })
+
+    def test_tag_dry_run_does_not_create_or_update_index(self):
+        self.image('a', b'abc')
+        import_images(self.source, self.destination, tag='Preview', dry_run=True)
+        self.assertFalse(self.destination.exists())
+        import_images(self.source, self.destination, tag='Saved')
+        before = (self.destination / 'tags.json').read_bytes()
+        import_images(self.source, self.destination, tag='Preview', dry_run=True)
+        self.assertEqual((self.destination / 'tags.json').read_bytes(), before)
+
+    def test_invalid_tags_fail_before_moving_files(self):
+        image = self.image('a', b'abc')
+        self.destination.mkdir()
+        index = self.destination / 'tags.json'
+        for contents in ['broken', '[]', '{"tag": [123]}']:
+            index.write_text(contents)
+            with self.assertRaisesRegex(ValueError, 'Invalid tag index'):
+                import_images(self.source, self.destination, tag='Trip', move=True)
+            self.assertTrue(image.exists())
+            self.assertEqual(index.read_text(), contents)
+        with self.assertRaisesRegex(ValueError, 'Tag must not be empty'):
+            import_images(self.source, self.destination, tag='  ', move=True)
+        self.assertTrue(image.exists())
+
+    def test_cli_tag_uses_undated_relative_paths(self):
+        self.date = None
+        self.image('a', b'abc')
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = main(['import', str(self.source), str(self.destination), '--tag', 'Été'])
+        self.assertEqual(result, 0)
+        self.assertEqual(json.loads((self.destination / 'tags.json').read_text()),
+                         {'Été': ['_undated/photo.JPG']})
+
     def test_heic_copy_and_move(self):
         for move, extension in [(False, '.heic'), (True, '.HEIC')]:
             with self.subTest(move=move, extension=extension):

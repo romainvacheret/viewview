@@ -7,6 +7,7 @@ import errno
 import os
 
 from .metadata import HANDLED_FORMATS, ImageMetadataReader
+from .tags import read_tags, write_tags
 
 
 @dataclass(frozen=True)
@@ -162,6 +163,7 @@ def organize_images(
 
 def import_images(
     source: Path, destination: Path, *, move: bool = False, dry_run: bool = False,
+    tag: str | None = None,
 ) -> OrganizationPlan:
     """Import images into date folders, or validate without writing in a dry run."""
     source = source.resolve()
@@ -172,5 +174,16 @@ def import_images(
         raise ValueError('Destination must be outside the source directory')
     if destination.exists() and not destination.is_dir():
         raise ValueError(f'Destination is not a directory: {destination}')
-    return organize_images(list_images(source, HANDLED_FORMATS), destination,
+    if tag is not None and not tag.strip():
+        raise ValueError('Tag must not be empty or whitespace')
+    tags = read_tags(destination) if tag is not None else None
+    if tags is not None:
+        _check_writable_directory(destination)
+    plan = organize_images(list_images(source, HANDLED_FORMATS), destination,
                            move=move, apply=True, dry_run=dry_run)
+    if tags is not None and not dry_run:
+        paths = {file.destination.relative_to(destination).as_posix()
+                 for file in plan.files + plan.identical_files}
+        tags[tag] = sorted(set(tags.get(tag, [])) | paths)
+        write_tags(destination, tags)
+    return plan
