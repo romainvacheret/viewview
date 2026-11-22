@@ -156,6 +156,9 @@ class FileManagementWidget(QtWidgets.QWidget):
     def _init_input(self):
         self._input = QtWidgets.QLabel()
         self._input.setObjectName('filemanager-input')
+        self._input.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                                  QtWidgets.QSizePolicy.Policy.Preferred)
+        self._input.setMinimumWidth(0)
 
     def _init_list(self):
         def _callback(item: QtWidgets.QListWidgetItem):
@@ -187,6 +190,9 @@ class ImageDisplayWidget(QtWidgets.QLabel):
     def __init__(self):
         super().__init__()
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                           QtWidgets.QSizePolicy.Policy.Ignored)
+        self.setMinimumSize(1, 1)
 
     def display_image(self, img_path: pathlib.Path):
         if img_path.suffix.lower() in HEIF_IMAGE_FORMATS:
@@ -211,68 +217,97 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
                  parent: QtWidgets.QSplitter) -> None:
         super().__init__(orientation, parent)
         self.setToolTip('Click to collapse or expand the panel. Drag to resize.')
-        # TODO: choose default
         self._saved_size = 300
-        self._saved_pos = None
+        self._press_position = None
+        self._press_sizes = None
+        self._dragging = False
+
+    def _target_index(self) -> int:
+        return 0 if self.splitter().handle(1) == self else 2
+
+    def _minimum_width(self, index: int) -> int:
+        widget = self.splitter().widget(index)
+        if widget.sizePolicy().horizontalPolicy() == QtWidgets.QSizePolicy.Policy.Ignored:
+            return max(1, widget.minimumWidth())
+        return max(1, widget.minimumWidth(), widget.minimumSizeHint().width())
 
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
-            self._saved_pos = event.position().toPoint()
+            self._press_position = event.globalPosition().toPoint()
+            self._press_sizes = self.splitter().sizes()
+            self._dragging = False
+            event.accept()
+        else:
+            super().mousePressEvent(event)
 
-        super().mousePressEvent(event)
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        if self._press_position is None:
+            super().mouseMoveEvent(event)
+            return
+
+        # The handle itself moves during a drag; local coordinates cannot
+        # distinguish that movement from a stationary click.
+        delta = event.globalPosition().toPoint() - self._press_position
+        if delta.manhattanLength() >= QtWidgets.QApplication.startDragDistance():
+            self._dragging = True
+        if self._dragging:
+            target = self._target_index()
+            sizes = self._press_sizes.copy()
+            available = sizes[target] + sizes[1]
+            minimum = self._minimum_width(target)
+            maximum = available - self._minimum_width(1)
+            if maximum >= minimum:
+                movement = delta.x() if target == 0 else -delta.x()
+                # Stop at the image area's minimum instead of pushing the
+                # opposite side panel. Collapse is reserved for a click.
+                sizes[target] = max(minimum, min(maximum, sizes[target] + movement))
+                sizes[1] = available - sizes[target]
+                self.splitter().set_panel_sizes(sizes)
+        event.accept()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
-        current_position = event.position().toPoint()
-        if (event.button() == QtCore.Qt.MouseButton.LeftButton and 
-            current_position == self._saved_pos):
-            self._collapse_split() 
+        if event.button() == QtCore.Qt.MouseButton.LeftButton and self._press_position is not None:
+            distance = (event.globalPosition().toPoint() - self._press_position).manhattanLength()
+            if not self._dragging and distance < QtWidgets.QApplication.startDragDistance():
+                self._collapse_split()
+            self._press_position = None
+            self._press_sizes = None
+            self._dragging = False
+            event.accept()
         else:
             super().mouseReleaseEvent(event)
 
-        self._saved_pos = None
-
     def _collapse_split(self):
-        FILE_SPLIT = 0
-        DISPLAY_SPLIT = 1
-        METADATA_SPLIT = 2
-
-        # Handles number starts at 1
-        target_split = FILE_SPLIT if self.splitter().handle(1) == self else \
-            METADATA_SPLIT
-
         splitter = self.splitter()
+        target = self._target_index()
         sizes = splitter.sizes()
-        target_size = sizes[target_split]
-
-        # Both splits should allow collapse: when using `splitter.setSizes()`
-        # the sizes that are passed are not necessariy applied. In particular, 
-        # if a split has `collapsible` to False, its size cannot be 0.
-        # For that reason it would expand back to its "minimum size" (e.g.
-        # the one from a label)
-        splitter.setCollapsible(FILE_SPLIT, True)
-        splitter.setCollapsible(METADATA_SPLIT, True)
-
-        is_collapsed = target_size == 0
-
-        # TODO: could improve safety
-        if is_collapsed:
-            sizes[target_split] = self._saved_size
-            sizes[DISPLAY_SPLIT] -= self._saved_size
-            self._saved_size = 0
+        available = sizes[target] + sizes[1]
+        if sizes[target] == 0:
+            minimum = self._minimum_width(target)
+            maximum = available - self._minimum_width(1)
+            if maximum < minimum:
+                return
+            sizes[target] = max(minimum, min(self._saved_size, maximum))
         else:
-            self._saved_size = target_size
-            sizes[target_split] = 0
-            sizes[DISPLAY_SPLIT] += target_size
+            self._saved_size = sizes[target]
+            sizes[target] = 0
+        sizes[1] = available - sizes[target]
 
-        splitter.setSizes(sizes)
-        # End of temporary collapsible state
-        splitter.setCollapsible(FILE_SPLIT, False)
-        splitter.setCollapsible(METADATA_SPLIT, False)
+        splitter.set_panel_sizes(sizes)
 
 
 class ToggleSplitter(QtWidgets.QSplitter):
     def createHandle(self):
         return ToggleSplitterHandle(self.orientation(), self)
+
+    def set_panel_sizes(self, sizes: list[int]) -> None:
+        # Qt otherwise expands an already-collapsed, noncollapsible panel
+        # back to its minimum width when any other panel changes size.
+        for index in (0, 2):
+            self.setCollapsible(index, sizes[index] == 0)
+        self.setSizes(sizes)
+        for index in (0, 2):
+            self.setCollapsible(index, False)
 
 
 class MainWidget(QtWidgets.QWidget):
@@ -280,6 +315,7 @@ class MainWidget(QtWidgets.QWidget):
         super().__init__()
         self._allow_close()
         self._FILE_MANAGEMENT_SIZE = 300
+        self._initial_sizes_set = False
 
         self.image_path: Optional[pathlib.Path] = None
 
@@ -296,11 +332,8 @@ class MainWidget(QtWidgets.QWidget):
         self._splitter.setStretchFactor(1, 1)
         self._splitter.setStretchFactor(2, 0)
 
-        # Should not be possible to collapse the splits at any time because would 
-        # collapse when resizing close to the edge of the screen
-        # Look at `ToggleSplitterHandle._collapse_split` for more details
-        self._splitter.setCollapsible(0, False)
-        self._splitter.setCollapsible(2, False)
+        # Dragging stops at minimum widths; only clicking collapses panels.
+        self._splitter.setChildrenCollapsible(False)
 
         self._layout = QtWidgets.QHBoxLayout(self) 
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -308,9 +341,16 @@ class MainWidget(QtWidgets.QWidget):
         self.setLayout(self._layout)
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:
-        self._splitter.setSizes((
-            self._FILE_MANAGEMENT_SIZE,
-            self._splitter.width() - self._FILE_MANAGEMENT_SIZE))
+        if not self._initial_sizes_set:
+            self._initial_sizes_set = True
+            side_width = self._FILE_MANAGEMENT_SIZE
+            metadata_width = self.metadata.sizeHint().width()
+            self._splitter.setSizes([
+                side_width,
+                max(1, self._splitter.width() - side_width - metadata_width
+                    - 2 * self._splitter.handleWidth()),
+                metadata_width,
+            ])
         return super().showEvent(event)
 
     def _allow_close(self):
