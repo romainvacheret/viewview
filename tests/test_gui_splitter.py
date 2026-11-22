@@ -3,10 +3,13 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 
 
 def check_splitter():
+    from PIL import Image
+    from PIL.ExifTags import Base
     from PySide6 import QtCore, QtGui, QtTest, QtWidgets
     from viewview.gui import MainWidget
 
@@ -19,6 +22,10 @@ def check_splitter():
             self.widget.resize(1440, 900)
             self.widget.show()
             app.processEvents()
+            self.widget.file_management._input.setText('Pictures / ' + 'Collection ' * 5)
+            self.widget.file_management.update_width_limit()
+            self.widget.metadata._descriptionw.setText('A detailed image description ' * 3)
+            self.widget.metadata.update_width_limit()
             self.splitter = self.widget._splitter
             self.splitter.setSizes([300, 800, 300])
             app.processEvents()
@@ -142,6 +149,94 @@ def check_splitter():
             self.widget.show()
             app.processEvents()
             self.assertEqual(self.splitter.sizes(), before)
+
+        def test_file_panel_limit_tracks_folder_contents(self):
+            panel = self.widget.file_management
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                longest_name = 'A longer photograph filename ' * 3 + '.jpg'
+                (root / longest_name).touch()
+                panel._selected_folder = root
+                panel._input.setText('Pictures')
+                panel._update_list()
+                app.processEvents()
+                limit = panel.maximumWidth()
+                text_width = panel._list.fontMetrics().horizontalAdvance(longest_name)
+                self.assertGreater(limit, text_width)
+                self.assertLess(limit, text_width + 120)
+                opposite = self.splitter.sizes()[2]
+                self.drag(1, 3000)
+                self.assertEqual(panel.width(), limit)
+                self.assertEqual(panel._list.horizontalScrollBar().maximum(), 0)
+                self.assertEqual(self.splitter.sizes()[2], opposite)
+
+                self.click(1)
+                (root / longest_name).unlink()
+                (root / 'short.jpg').touch()
+                panel._update_list()
+                app.processEvents()
+                self.assertLess(panel.maximumWidth(), limit - 100)
+                self.assertEqual(self.splitter.sizes()[0], 0)
+                self.click(1)
+                self.assertEqual(panel.width(), panel.maximumWidth())
+
+        def test_metadata_limit_tracks_image_and_fits_both_columns(self):
+            panel = self.widget.metadata
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / 'photo.jpg'
+                exif = Image.Exif()
+                description = 'A detailed photograph description ' * 2
+                exif[Base.ImageDescription] = description
+                Image.new('RGB', (24, 16)).save(path, exif=exif)
+                self.widget.set_current_image(path)
+                app.processEvents()
+                limit = panel.maximumWidth()
+                opposite = self.splitter.sizes()[0]
+                self.drag(2, -3000)
+                self.assertEqual(panel.width(), limit)
+                self.assertGreaterEqual(panel._descriptionw.width(), panel._descriptionw.sizeHint().width())
+                self.assertLess(panel.width() - panel._descriptionw.sizeHint().width(), 200)
+                self.assertEqual(self.splitter.sizes()[0], opposite)
+
+                Image.new('RGB', (24, 16)).save(path)
+                self.widget.set_current_image(path)
+                app.processEvents()
+                self.assertLess(panel.maximumWidth(), limit - 100)
+                self.assertLessEqual(panel.width(), panel.maximumWidth())
+                self.widget.resize(1800, 900)
+                app.processEvents()
+                self.assertLessEqual(panel.width(), panel.maximumWidth())
+
+        def test_full_path_tooltips_follow_hover_and_hide_in_empty_space(self):
+            from html import escape
+            from unittest.mock import patch
+
+            panel = self.widget.file_management
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                for name in ('a very long filename <photo&>.jpg', 'another picture.png'):
+                    (root / name).touch()
+                with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=directory):
+                    panel.select_folder()
+                app.processEvents()
+                self.assertIn(str(root), panel._input.toolTip())
+                listing = panel._list
+                viewport = listing.viewport()
+                first = listing.visualItemRect(listing.item(0)).center()
+                help_event = QtGui.QHelpEvent(QtCore.QEvent.Type.ToolTip, first,
+                                             viewport.mapToGlobal(first))
+                app.sendEvent(viewport, help_event)
+                self.assertTrue(QtWidgets.QToolTip.isVisible())
+                self.assertIn(escape(str(root / listing.item(0).text())), QtWidgets.QToolTip.text())
+
+                second = listing.visualItemRect(listing.item(1)).center()
+                QtTest.QTest.mouseMove(viewport, second)
+                app.processEvents()
+                self.assertIn(escape(str(root / listing.item(1).text())), QtWidgets.QToolTip.text())
+
+                QtTest.QTest.mouseMove(viewport, QtCore.QPoint(5, viewport.height() - 5))
+                QtTest.QTest.qWait(400)
+                self.assertFalse(QtWidgets.QToolTip.isVisible())
 
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromTestCase(SplitterTests))

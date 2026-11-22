@@ -1,4 +1,5 @@
 import pathlib
+from html import escape
 
 from dataclasses import dataclass
 from datetime import datetime
@@ -131,6 +132,46 @@ class MetadataWidget(QtWidgets.QGroupBox):
         self._softwarew.setText(meta.software)
         self._copyrightw.setText(meta.copyright)
         self._dimensionw.setText(f'{metadata.width}x{metadata.height}')
+        self.update_width_limit()
+
+    def update_width_limit(self):
+        self.ensurePolished()
+        labels = []
+        values = []
+        for row in range(self._layout.rowCount()):
+            labels.append(self._layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
+                          .widget().sizeHint().width())
+            values.append(self._layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.FieldRole)
+                          .widget().sizeHint().width())
+        margins = self._layout.contentsMargins()
+        frame = self.width() - self.contentsRect().width()
+        width = (max(labels) + max(values) + max(0, self._layout.horizontalSpacing())
+                 + margins.left() + margins.right() + frame + 24)
+        self.setMaximumWidth(max(self.minimumSizeHint().width(), width))
+
+
+class PathListWidget(QtWidgets.QListWidget):
+    def __init__(self):
+        super().__init__()
+        self.setMouseTracking(True)
+
+    def viewportEvent(self, event):
+        if event.type() == QtCore.QEvent.Type.ToolTip:
+            self._show_path_tooltip(event.pos(), event.globalPos())
+            return True
+        if event.type() == QtCore.QEvent.Type.MouseMove and QtWidgets.QToolTip.isVisible():
+            self._show_path_tooltip(event.position().toPoint(), event.globalPosition().toPoint())
+        elif event.type() == QtCore.QEvent.Type.Leave:
+            QtWidgets.QToolTip.hideText()
+        return super().viewportEvent(event)
+
+    def _show_path_tooltip(self, position, global_position):
+        item = self.itemAt(position)
+        if item is None:
+            QtWidgets.QToolTip.hideText()
+        else:
+            QtWidgets.QToolTip.showText(global_position, item.toolTip(),
+                                       self.viewport(), self.visualItemRect(item))
 
 
 class FileManagementWidget(QtWidgets.QWidget):
@@ -148,6 +189,7 @@ class FileManagementWidget(QtWidgets.QWidget):
         self._selected_folder = pathlib.Path(self._browser.getExistingDirectory())
 
         self._input.setText(str(self._selected_folder))
+        self._input.setToolTip(f'<qt>{escape(str(self._selected_folder.resolve()))}</qt>')
         self._update_list()
 
         # QtWidgets.QWidget objects don't print their style by default
@@ -164,7 +206,7 @@ class FileManagementWidget(QtWidgets.QWidget):
         def _callback(item: QtWidgets.QListWidgetItem):
             self._parent.set_current_image(item.data(QtCore.Qt.ItemDataRole.UserRole))
 
-        self._list = QtWidgets.QListWidget()
+        self._list = PathListWidget()
         self._list.itemClicked.connect(_callback)
 
     def _update_list(self):
@@ -176,7 +218,20 @@ class FileManagementWidget(QtWidgets.QWidget):
             filename = file.relative_to(self._selected_folder)
             item = QtWidgets.QListWidgetItem(str(filename))
             item.setData(QtCore.Qt.ItemDataRole.UserRole, file)
+            item.setToolTip(f'<qt>{escape(str(file.resolve()))}</qt>')
             self._list.addItem(item)
+        self.update_width_limit()
+
+    def update_width_limit(self):
+        self.ensurePolished()
+        # Delegate hints include item styling; reserve room for a scrollbar
+        # so adding more files never makes the longest filename clip.
+        list_width = (max(0, self._list.sizeHintForColumn(0)) + 2 * self._list.frameWidth()
+                      + self._list.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent))
+        margins = self._layout.contentsMargins()
+        width = (max(self._input.sizeHint().width(), list_width)
+                 + margins.left() + margins.right() + 24)
+        self.setMaximumWidth(max(self.minimumSizeHint().width(), width))
 
     def _init_layout(self):
         self._layout = QtWidgets.QVBoxLayout(self)
@@ -255,7 +310,8 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
             sizes = self._press_sizes.copy()
             available = sizes[target] + sizes[1]
             minimum = self._minimum_width(target)
-            maximum = available - self._minimum_width(1)
+            maximum = min(available - self._minimum_width(1),
+                          self.splitter().widget(target).maximumWidth())
             if maximum >= minimum:
                 movement = delta.x() if target == 0 else -delta.x()
                 # Stop at the image area's minimum instead of pushing the
@@ -284,7 +340,8 @@ class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
         available = sizes[target] + sizes[1]
         if sizes[target] == 0:
             minimum = self._minimum_width(target)
-            maximum = available - self._minimum_width(1)
+            maximum = min(available - self._minimum_width(1),
+                          splitter.widget(target).maximumWidth())
             if maximum < minimum:
                 return
             sizes[target] = max(minimum, min(self._saved_size, maximum))
@@ -343,6 +400,8 @@ class MainWidget(QtWidgets.QWidget):
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         if not self._initial_sizes_set:
             self._initial_sizes_set = True
+            self.file_management.update_width_limit()
+            self.metadata.update_width_limit()
             side_width = self._FILE_MANAGEMENT_SIZE
             metadata_width = self.metadata.sizeHint().width()
             self._splitter.setSizes([
