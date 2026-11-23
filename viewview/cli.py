@@ -15,7 +15,7 @@ def main(argv: list[str] | None = None) -> int:
     importer.add_argument('source', type=Path)
     importer.add_argument('destination', type=Path)
     importer.add_argument('--move', action='store_true', help='Move files instead of copying them')
-    importer.add_argument('--tag', help='Tag imported media in destination/tags.json (merges with existing paths)')
+    importer.add_argument('--tag', help='Tag imported media in the destination library database')
     importer.add_argument(
         '--dry-run', action='store_true',
         help='Check the import without changing source or destination; save the report in the system temporary directory',

@@ -10,9 +10,11 @@ def check_review_gui():
     import tempfile
     from unittest.mock import patch
     from PIL import Image
+    from PIL.ExifTags import Base
     from PySide6 import QtCore, QtTest, QtWidgets
     from viewview.gui import MainWidget
-    from viewview.core.review import read_deletion_marks, review_path
+    from viewview.core.review import read_deletion_marks, review_path, read_rating
+    from viewview.core.library_db import DATABASE_NAME
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
@@ -67,6 +69,74 @@ def check_review_gui():
             self.assertEqual(read_deletion_marks(self.root), set())
             self.assertTrue(all(path.exists() for path in self.paths))
 
+        def test_rating_is_editable_persistent_and_can_override_exif_with_zero(self):
+            first, second = self.paths
+            exif = Image.Exif()
+            exif[Base.Rating] = 4
+            Image.new('RGB', (24, 16), 'red').save(first, exif=exif)
+            original = first.read_bytes()
+            self.assertFalse(self.widget.metadata._ratingw.isEnabled())
+            self.widget.set_current_image(first)
+            rating = self.widget.metadata._ratingw
+            self.assertTrue(rating.isEnabled())
+            self.assertEqual(rating.value(), 4)
+            self.assertFalse((self.root / DATABASE_NAME).exists())
+            rating.setValue(5)
+            self.assertEqual(read_rating(self.root, first), 5)
+            self.widget.set_current_image(second)
+            self.assertEqual(rating.value(), 0)
+            self.widget.set_current_image(first)
+            self.assertEqual(rating.value(), 5)
+            self.widget.close()
+            reopened = self.open_window(self.root)
+            reopened.set_current_image(first)
+            self.assertEqual(reopened.metadata._ratingw.value(), 5)
+            reopened.metadata._ratingw.setValue(0)
+            reopened.set_current_image(second)
+            reopened.set_current_image(first)
+            self.assertEqual(reopened.metadata._ratingw.value(), 0)
+            self.assertEqual(read_rating(self.root, first), 0)
+            self.assertEqual(first.read_bytes(), original)
+
+        def test_rating_save_failure_restores_previous_value(self):
+            first = self.paths[0]
+            self.widget.set_current_image(first)
+            self.widget.metadata._ratingw.setValue(3)
+            with patch('viewview.gui.set_rating', side_effect=PermissionError('Read-only library')):
+                self.widget.metadata._ratingw.setValue(5)
+            self.assertEqual(self.widget.metadata._ratingw.value(), 3)
+            self.assertEqual(read_rating(self.root, first), 3)
+            self.assertEqual(self.widget.image_path, first)
+            self.assertIn('Could not save rating', self.widget.metadata.review_error.text())
+
+        def test_clicking_stars_sets_changes_and_clears_persistent_rating(self):
+            first, second = self.paths
+            rating = self.widget.metadata._ratingw
+            self.widget.set_current_image(first)
+            def click(number):
+                QtTest.QTest.mouseClick(rating.stars[number - 1], QtCore.Qt.MouseButton.LeftButton)
+                app.processEvents()
+            click(4)
+            self.assertEqual(rating.value(), 4)
+            self.assertEqual([star.isChecked() for star in rating.stars], [True] * 4 + [False])
+            self.assertEqual(read_rating(self.root, first), 4)
+            click(2)
+            self.assertEqual(rating.value(), 2)
+            self.assertEqual([star.isChecked() for star in rating.stars], [True, True, False, False, False])
+            click(5)
+            self.assertEqual(read_rating(self.root, first), 5)
+            click(5)
+            self.assertEqual(rating.value(), 0)
+            self.assertTrue(all(not star.isChecked() for star in rating.stars))
+            self.assertEqual(read_rating(self.root, first), 0)
+            self.widget.set_current_image(second)
+            self.widget.set_current_image(first)
+            self.assertEqual(rating.value(), 0)
+            with patch('viewview.gui.set_rating', side_effect=PermissionError('Read-only library')):
+                click(3)
+            self.assertEqual(rating.value(), 0)
+            self.assertTrue(all(not star.isChecked() for star in rating.stars))
+
         def test_x_toggles_and_selects_next_and_stops_at_last(self):
             first, second = self.paths
             self.widget.set_current_image(first)
@@ -91,7 +161,7 @@ def check_review_gui():
         def test_shortcut_disabled_until_photo_selected_and_on_import_tab(self):
             self.assertFalse(self.widget.metadata.deletion_checkbox.isEnabled())
             self.press_x()
-            self.assertFalse((self.root / 'review.json').exists())
+            self.assertFalse((self.root / DATABASE_NAME).exists())
             self.widget.set_current_image(self.paths[0])
             self.widget.tabs.setCurrentIndex(1)
             self.assertFalse(self.widget._mark_shortcut.isEnabled())
@@ -99,7 +169,7 @@ def check_review_gui():
             entry.setFocus()
             QtTest.QTest.keyClicks(entry, 'x')
             self.assertEqual(entry.text(), 'x')
-            self.assertFalse((self.root / 'review.json').exists())
+            self.assertFalse((self.root / DATABASE_NAME).exists())
             self.widget.tabs.setCurrentIndex(0)
             self.assertTrue(self.widget._mark_shortcut.isEnabled())
 
@@ -111,7 +181,7 @@ def check_review_gui():
                 self.press_x()
             self.assertEqual(self.widget.image_path, self.paths[0])
             self.assertIn('Could not save', self.widget.metadata.review_error.text())
-            self.assertFalse((self.root / 'review.json').exists())
+            self.assertFalse((self.root / DATABASE_NAME).exists())
 
         def test_invalid_index_disables_marks_without_overwriting_it(self):
             (self.root / 'review.json').write_text('broken')
@@ -120,6 +190,15 @@ def check_review_gui():
             self.assertFalse(self.widget._mark_shortcut.isEnabled())
             self.assertIn('Could not load', self.widget.metadata.review_error.text())
             self.assertEqual((self.root / 'review.json').read_text(), 'broken')
+
+        def test_corrupt_database_disables_marks_without_overwriting_it(self):
+            path = self.root / DATABASE_NAME
+            path.write_bytes(b'broken database')
+            self.widget.set_current_image(self.paths[0])
+            self.assertFalse(self.widget.metadata.deletion_checkbox.isEnabled())
+            self.assertFalse(self.widget._mark_shortcut.isEnabled())
+            self.assertIn('Library database error', self.widget.metadata.review_error.text())
+            self.assertEqual(path.read_bytes(), b'broken database')
 
         def test_switching_library_clears_current_review_state(self):
             self.widget.set_current_image(self.paths[0])

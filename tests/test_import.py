@@ -11,6 +11,8 @@ from unittest.mock import patch
 
 from viewview.cli import main
 from viewview.core.metadata import FileInfo
+from viewview.core.tags import read_tags
+from viewview.core.library_db import DATABASE_NAME
 from viewview.core.organization import import_images, plan_organization, apply_plan
 
 
@@ -64,7 +66,7 @@ class ImportTests(unittest.TestCase):
         import_images(self.source, self.destination, tag='Favorites')
         self.image('c', b'new')
         import_images(self.source, self.destination, tag='Holiday', move=True)
-        tags = json.loads((self.destination / 'tags.json').read_text())
+        tags = read_tags(self.destination)
         self.assertEqual(tags, {
             'Holiday': ['2026/11/02/photo.JPG', '2026/11/02/photo_1.JPG',
                         '2026/11/02/photo_2.JPG'],
@@ -76,9 +78,9 @@ class ImportTests(unittest.TestCase):
         import_images(self.source, self.destination, tag='Preview', dry_run=True)
         self.assertFalse(self.destination.exists())
         import_images(self.source, self.destination, tag='Saved')
-        before = (self.destination / 'tags.json').read_bytes()
+        before = (self.destination / DATABASE_NAME).read_bytes()
         import_images(self.source, self.destination, tag='Preview', dry_run=True)
-        self.assertEqual((self.destination / 'tags.json').read_bytes(), before)
+        self.assertEqual((self.destination / DATABASE_NAME).read_bytes(), before)
 
     def test_multiple_tags_are_validated_and_written_together(self):
         image = self.image('a', b'abc')
@@ -89,7 +91,7 @@ class ImportTests(unittest.TestCase):
         self.assertTrue(image.exists())
         import_images(self.source, self.destination, tags=['Summer holiday', 'family', 'family'], move=True)
         self.assertFalse(image.exists())
-        self.assertEqual(json.loads((self.destination / 'tags.json').read_text()), {
+        self.assertEqual(read_tags(self.destination), {
             'Summer holiday': ['2026/11/02/photo.JPG'],
             'family': ['2026/11/02/photo.JPG'],
         })
@@ -114,8 +116,23 @@ class ImportTests(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             result = main(['import', str(self.source), str(self.destination), '--tag', 'Été'])
         self.assertEqual(result, 0)
-        self.assertEqual(json.loads((self.destination / 'tags.json').read_text()),
+        self.assertEqual(read_tags(self.destination),
                          {'Été': ['_undated/photo.JPG']})
+
+    def test_readonly_database_fails_before_moving_files(self):
+        self.image('a', b'abc')
+        import_images(self.source, self.destination, tag='Saved')
+        image = self.image('b', b'new')
+        database_path = self.destination / DATABASE_NAME
+        before = database_path.read_bytes()
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run):
+                with patch('viewview.core.organization.os.access',
+                           side_effect=lambda path, mode: path != database_path):
+                    with self.assertRaises(PermissionError):
+                        import_images(self.source, self.destination, tag='New', move=True, dry_run=dry_run)
+                self.assertTrue(image.exists())
+                self.assertEqual(database_path.read_bytes(), before)
 
     def test_heic_copy_and_move(self):
         for move, extension in [(False, '.heic'), (True, '.HEIC')]:

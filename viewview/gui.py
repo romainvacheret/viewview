@@ -1,4 +1,5 @@
 import pathlib
+import math
 from html import escape
 
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ from pillow_heif import register_heif_opener
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from .import_gui import ImportWidget
-from .core.review import read_deletion_marks, review_path, set_deletion_mark
+from .core.review import is_marked_for_deletion, set_deletion_mark, read_rating, set_rating
 
 register_heif_opener()
 
@@ -70,6 +71,83 @@ class MetadataHandler:
         with Image.open(image) as img:
             return ImageInfo(self._read_exif(img), img.width, img.height, image)
 
+class RatingStar(QtWidgets.QAbstractButton):
+    def __init__(self, number: int, parent):
+        super().__init__(parent)
+        self.setCheckable(True)
+        self.setFixedSize(28, 30)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName(f'{number} stars')
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        if not self.isEnabled():
+            painter.setOpacity(0.4)
+        if self.hasFocus():
+            painter.setPen(QtGui.QPen(QtGui.QColor('#68b6a7'), 1))
+            painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 4, 4)
+        star = QtGui.QPainterPath()
+        center = QtCore.QPointF(self.width() / 2, self.height() / 2)
+        for point in range(10):
+            angle = -math.pi / 2 + point * math.pi / 5
+            radius = 11 if point % 2 == 0 else 4.8
+            position = center + QtCore.QPointF(math.cos(angle) * radius, math.sin(angle) * radius)
+            if point == 0:
+                star.moveTo(position)
+            else:
+                star.lineTo(position)
+        star.closeSubpath()
+        color = '#ffffff' if self.isChecked() else '#080b10'
+        if self.underMouse() and not self.isChecked():
+            color = '#8f9eaf'
+        painter.setPen(QtGui.QPen(QtGui.QColor(color), 1.5))
+        painter.setBrush(QtGui.QColor('#ffffff') if self.isChecked() else QtCore.Qt.BrushStyle.NoBrush)
+        painter.drawPath(star)
+
+
+class StarRatingWidget(QtWidgets.QWidget):
+    valueChanged = QtCore.Signal(int)
+
+    def __init__(self):
+        super().__init__()
+        self._value = 0
+        self.setAccessibleName('Photo rating')
+        self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Fixed, QtWidgets.QSizePolicy.Policy.Fixed)
+        layout = QtWidgets.QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        self.stars = []
+        for number in range(1, 6):
+            star = RatingStar(number, self)
+            star.clicked.connect(lambda _checked, rating=number:
+                                 self.setValue(0 if rating == self._value else rating))
+            layout.addWidget(star)
+            self.stars.append(star)
+        self._refresh_stars()
+
+    def value(self) -> int:
+        return self._value
+
+    def setValue(self, rating: int):
+        if type(rating) is not int or not 0 <= rating <= 5:
+            raise ValueError('Rating must be an integer between 0 and 5')
+        changed = self._value != rating
+        self._value = rating
+        self._refresh_stars()
+        if changed:
+            self.valueChanged.emit(rating)
+
+    def _refresh_stars(self):
+        self.setAccessibleDescription(f'{self._value} out of 5 stars' if self._value else 'Unrated')
+        for number, star in enumerate(self.stars, 1):
+            star.setChecked(number <= self._value)
+            star.setToolTip('Clear rating' if number == self._value else f'Set rating to {number} stars')
+            star.update()
+
+
 class MetadataWidget(QtWidgets.QGroupBox):
     def __init__(self, parent: 'MainWidget'):
         super().__init__('', parent)
@@ -93,7 +171,10 @@ class MetadataWidget(QtWidgets.QGroupBox):
             return label
 
         self._datew = _init_label('', 'description')
-        self._ratingw = _init_label('', 'description')
+        self._ratingw = StarRatingWidget()
+        self._ratingw.setEnabled(False)
+        self._ratingw.valueChanged.connect(parent.set_rating)
+        self._image_rating = 0
         self._descriptionw = _init_label('', 'description')
         self._cameraw = _init_label('', 'description')
         self._softwarew = _init_label('', 'description')
@@ -139,6 +220,11 @@ class MetadataWidget(QtWidgets.QGroupBox):
         self.review_error.setVisible(bool(error))
         self.update_width_limit()
 
+    def set_rating_state(self, rating: int, enabled: bool):
+        with QtCore.QSignalBlocker(self._ratingw):
+            self._ratingw.setValue(rating)
+        self._ratingw.setEnabled(enabled)
+
     def update_info(self, image_path: pathlib.Path):
         print(image_path)
         # TODO: path should never be None but check
@@ -151,7 +237,11 @@ class MetadataWidget(QtWidgets.QGroupBox):
 
         self._datew.setText(meta.intial_date.strftime("%d/%m/%Y") 
                             if meta.intial_date is not None else '')
-        self._ratingw.setText(str(meta.rating))
+        try:
+            self._image_rating = max(0, min(5, int(meta.rating)))
+        except (ValueError, TypeError, OverflowError):
+            self._image_rating = 0
+        self.set_rating_state(self._image_rating, False)
         self._descriptionw.setText(meta.description)
         self._cameraw.setText(meta.camera)
         self._softwarew.setText(meta.software)
@@ -573,6 +663,7 @@ class MainWidget(QtWidgets.QWidget):
         self.image_display.clear()
         self._marked_for_deletion = False
         self.metadata.set_review_state(False, False)
+        self.metadata.set_rating_state(0, False)
         self._update_mark_shortcut()
 
     def _update_mark_shortcut(self, *_):
@@ -582,15 +673,20 @@ class MainWidget(QtWidgets.QWidget):
     def _load_review_state(self):
         library = getattr(self.file_management, '_selected_folder', None)
         self._marked_for_deletion = False
+        self._saved_rating = self.metadata._image_rating
         enabled = library is not None and self.image_path is not None
         error = ''
         if enabled:
             try:
-                self._marked_for_deletion = review_path(library, self.image_path) in read_deletion_marks(library)
+                self._marked_for_deletion = is_marked_for_deletion(library, self.image_path)
+                rating = read_rating(library, self.image_path)
+                if rating is not None:
+                    self._saved_rating = rating
             except (OSError, ValueError) as failure:
                 enabled = False
                 error = f'Could not load review marks: {failure}'
         self.metadata.set_review_state(self._marked_for_deletion, enabled, error)
+        self.metadata.set_rating_state(self._saved_rating, enabled)
         self._update_mark_shortcut()
 
     def set_deletion_mark(self, marked: bool) -> bool:
@@ -610,6 +706,20 @@ class MainWidget(QtWidgets.QWidget):
     def mark_and_advance(self):
         if self.tabs.currentIndex() == 0 and self.set_deletion_mark(not self._marked_for_deletion):
             self.file_management.select_next_image(self.image_path)
+
+    def set_rating(self, rating: int):
+        library = getattr(self.file_management, '_selected_folder', None)
+        if library is None or self.image_path is None or not self.metadata._ratingw.isEnabled():
+            return
+        try:
+            set_rating(library, self.image_path, rating)
+        except (OSError, ValueError) as failure:
+            self.metadata.set_rating_state(self._saved_rating, True)
+            self.metadata.set_review_state(self._marked_for_deletion, True,
+                                           f'Could not save rating: {failure}')
+            return
+        self._saved_rating = rating
+        self.metadata.set_review_state(self._marked_for_deletion, True)
 
 
 def main() -> int:

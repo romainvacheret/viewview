@@ -2,9 +2,9 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from viewview.core.review import read_deletion_marks, set_deletion_mark
+from viewview.core.library_db import DATABASE_NAME, database
 
 
 class ReviewTests(unittest.TestCase):
@@ -26,7 +26,7 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(read_deletion_marks(self.root), {'2026/07/12/second.jpg'})
         moved = self.root / 'relocated'
         moved.mkdir()
-        (self.root / 'review.json').rename(moved / 'review.json')
+        (self.root / DATABASE_NAME).rename(moved / DATABASE_NAME)
         self.assertEqual(read_deletion_marks(moved), {'2026/07/12/second.jpg'})
 
     def test_invalid_indexes_are_not_overwritten(self):
@@ -39,14 +39,13 @@ class ReviewTests(unittest.TestCase):
                     set_deletion_mark(self.root, self.first, True)
                 self.assertEqual(path.read_text(), data)
 
-    def test_failed_atomic_replace_preserves_previous_marks(self):
+    def test_failed_transaction_preserves_previous_marks(self):
         set_deletion_mark(self.root, self.first, True)
-        before = (self.root / 'review.json').read_bytes()
-        with patch('viewview.core.review.os.replace', side_effect=PermissionError('Read-only library')):
-            with self.assertRaises(PermissionError):
-                set_deletion_mark(self.root, self.second, True)
-        self.assertEqual((self.root / 'review.json').read_bytes(), before)
-        self.assertEqual(list(self.root.glob('.review-*')), [])
+        with self.assertRaisesRegex(RuntimeError, 'interrupted'):
+            with database(self.root, write=True) as connection:
+                connection.execute("UPDATE photos SET to_be_deleted = 0")
+                raise RuntimeError('interrupted')
+        self.assertEqual(read_deletion_marks(self.root), {'2026/07/12/first.jpg'})
 
     def test_marks_cannot_escape_the_library_and_do_not_change_tags(self):
         tags = self.root / 'tags.json'
@@ -54,6 +53,6 @@ class ReviewTests(unittest.TestCase):
         before = tags.read_bytes()
         with self.assertRaises(ValueError):
             set_deletion_mark(self.root, self.root / '../outside.jpg', True)
-        self.assertFalse((self.root / 'review.json').exists())
+        self.assertFalse((self.root / DATABASE_NAME).exists())
         set_deletion_mark(self.root, self.first, True)
         self.assertEqual(tags.read_bytes(), before)

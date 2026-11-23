@@ -116,7 +116,7 @@ def check_images():
                         widget.set_current_image(path)
                         self.assertFalse(widget.image_display.pixmap().isNull())
                         self.assertEqual(widget.metadata._datew.text(), '02/11/2026')
-                        self.assertEqual(widget.metadata._ratingw.text(), '4')
+                        self.assertEqual(widget.metadata._ratingw.value(), 4)
                         self.assertEqual(widget.metadata._descriptionw.text(), 'A picture')
                         self.assertEqual(widget.metadata._cameraw.text(), 'Camera')
                         self.assertEqual(widget.metadata._softwarew.text(), 'Editor')
@@ -135,7 +135,7 @@ def check_images():
                     self.assertLess(color.green(), 15)
                     for field in ('_datew', '_descriptionw', '_cameraw', '_softwarew', '_copyrightw'):
                         self.assertEqual(getattr(widget.metadata, field).text(), '')
-                    self.assertEqual(widget.metadata._ratingw.text(), '0')
+                    self.assertEqual(widget.metadata._ratingw.value(), 0)
                     self.assertEqual(widget.metadata._dimensionw.text(), '32x24')
 
                 (root / 'directory.jpg').mkdir()

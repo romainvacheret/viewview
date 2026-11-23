@@ -1,42 +1,22 @@
-"""Root-level tag index for imported media."""
-
-import json
-import os
+"""Tag associations in the library's SQLite database."""
 from pathlib import Path
-import tempfile
+
+from .library_db import database, insert_tags, validate_paths
 
 
-def read_tags(destination: Path) -> dict[str, list[str]]:
-    path = destination / 'tags.json'
-    try:
-        with path.open(encoding='utf-8') as source:
-            tags = json.load(source)
-    except FileNotFoundError:
-        return {}
-    except (ValueError, UnicodeError) as error:
-        raise ValueError(f'Invalid tag index {path}: {error}') from error
-    if not isinstance(tags, dict) or any(
-        not isinstance(tag, str) or not isinstance(paths, list)
-        or any(not isinstance(value, str) for value in paths)
-        for tag, paths in tags.items()
-    ):
-        raise ValueError(f'Invalid tag index {path}: expected tag names mapped to lists of paths')
-    return tags
+def read_tags(destination: Path, *, read_only: bool = False) -> dict[str, list[str]]:
+    with database(destination, migrate=not read_only) as connection:
+        tags = {row[0]: [] for row in connection.execute('SELECT name FROM tags ORDER BY name')}
+        for name, path in connection.execute('SELECT tag_name, photo_path FROM photo_tags ORDER BY tag_name, photo_path'):
+            tags[name].append(path)
+        return tags
 
 
-def write_tags(destination: Path, tags: dict[str, list[str]]) -> None:
-    """Replace the index atomically so interrupted writes cannot truncate it."""
-    destination.mkdir(parents=True, exist_ok=True)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode='w', encoding='utf-8', dir=destination,
-            prefix='.tags-', suffix='.tmp', delete=False,
-        ) as output:
-            temporary = Path(output.name)
-            json.dump(tags, output, indent=2, ensure_ascii=False, sort_keys=True)
-            output.write('\n')
-        os.replace(temporary, destination / 'tags.json')
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+def add_tags(destination: Path, names, paths) -> None:
+    """Merge associations in one transaction without overwriting other writers."""
+    names = tuple(dict.fromkeys(names))
+    if any(not isinstance(name, str) or not name.strip() for name in names):
+        raise ValueError('Tag must not be empty or whitespace')
+    paths = validate_paths(paths)
+    with database(destination, write=True) as connection:
+        insert_tags(connection, names, paths)

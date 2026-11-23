@@ -19,6 +19,8 @@ def _smoke_test():
     from PySide6 import QtWidgets
     from .gui import MainWidget
     from . import gui
+    from .core.review import read_deletion_marks, set_deletion_mark, read_rating, set_rating
+    from .core.tags import add_tags, read_tags
 
     app = QtWidgets.QApplication([])
     stylesheet = Path(gui.__file__).with_name('style.qss')
@@ -35,6 +37,13 @@ def _smoke_test():
             pixmap = widget.image_display.pixmap()
             if pixmap.isNull() or pixmap.toImage().pixelColor(0, 0).red() < 240:
                 raise RuntimeError(f'Packaged {extension} decoding failed')
+        library = Path(directory)
+        set_deletion_mark(library, path, True)
+        set_rating(library, path, 4)
+        add_tags(library, ['Bundle check'], [path.name])
+        if (read_deletion_marks(library) != {path.name} or read_rating(library, path) != 4
+                or read_tags(library) != {'Bundle check': [path.name]}):
+            raise RuntimeError('Packaged SQLite metadata storage failed')
     widget.close()
-    print('Viewview bundle check passed: Qt, stylesheet, JPEG, PNG, HEIC')
+    print('Viewview bundle check passed: Qt, stylesheet, JPEG, PNG, HEIC, SQLite')
     return 0

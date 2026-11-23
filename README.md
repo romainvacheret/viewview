@@ -11,7 +11,25 @@ In the Viewer tab, the right panel's **To be deleted** checkbox saves a review
 mark without deleting the file. Press **X** to toggle the current picture's mark and
 select the next picture; on the last picture, it stays selected. Uncheck the box
 to remove a mark. Marks reload when selecting pictures after reopening a library
-and are stored as relative paths in `review.json` beside `tags.json`.
+and are stored with tags in the library's `viewview.sqlite3` database. Image
+paths are relative to the library root, so moving the whole library preserves
+its metadata.
+
+The right panel's **Rating** control has five clickable stars. Click the fourth
+star for a rating of 4, another star to change it, or the current rating's star
+again to clear it. Selected stars are white; unselected stars are transparent
+with dark outlines. Ratings are saved in the same database. Existing EXIF ratings are shown
+until a library rating is saved. Saved ratings take precedence, including an
+explicit Unrated value, and changing a rating leaves the image file untouched.
+Older library databases upgrade automatically; dry runs leave them unchanged.
+
+Existing `tags.json` and `review.json` files are migrated automatically on first
+metadata access. Both are validated and migrated in one transaction; the
+original JSON files remain untouched as backups. Once the database exists,
+changes use SQLite and those backups are no longer read. Import previews and
+CLI dry runs validate legacy data without creating a database or migrating it.
+SQLite is included through Python; users do not need to install a database
+server or the `sqlite3` command-line tool.
 
 Run the GUI with its dependencies provided by Nix:
 
@@ -81,7 +99,7 @@ result/Viewview.app/Contents/MacOS/Viewview --smoke-test
 ```
 
 The check starts Qt offscreen, loads the bundled stylesheet, and exercises JPEG,
-PNG, and HEIC encoding/decoding. The macOS build also rejects Mach-O dependency
+PNG, HEIC encoding/decoding, and SQLite tag/review persistence. The macOS build also rejects Mach-O dependency
 paths and RPATHs that still point into `/nix/store`.
 
 [Build portable applications](.github/workflows/build.yml) runs tests and native
@@ -111,16 +129,11 @@ python -m viewview import /path/to/source /path/to/library --tag "Summer holiday
 
 Use `--move` to move files or `--dry-run` to preview without changing either
 folder. Tags are optional. Each tagged import merges its destination paths into
-`tags.json` at the library root:
-
-```json
-{
-  "Summer holiday": ["2026/07/12/photo.JPG", "2026/07/12/video.MOV"]
-}
-```
-
-Paths are relative to the library root, sorted and deduplicated. Identical files
+`viewview.sqlite3` at the library root. Paths are relative and associations are
+deduplicated. Identical files
 already in the library receive the tag too; invalid media are excluded. Tag names
 are case-sensitive and cannot be blank. Other tags are preserved. Dry runs validate
-the existing index without updating it. The index is replaced atomically; run
-imports into the same library one at a time to avoid concurrent updates losing tags.
+the existing database without updating it. SQLite transactions coordinate metadata
+writes from multiple app instances. File imports into the same library should
+still run one at a time: filesystem copying/moving is separate from the database
+transaction. Import reports remain separate JSON diagnostic files.

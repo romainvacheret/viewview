@@ -1,47 +1,46 @@
-"""Persistent review marks, stored alongside the library's tag index."""
-import json
+"""Persistent photo ratings and review marks in the library's SQLite database."""
 import os
-from pathlib import Path, PurePosixPath
-import tempfile
+from pathlib import Path
+
+from .library_db import database, validate_paths
 
 
 def read_deletion_marks(library: Path) -> set[str]:
-    path = library / 'review.json'
-    try:
-        with path.open(encoding='utf-8') as source:
-            data = json.load(source)
-    except FileNotFoundError:
-        return set()
-    except (ValueError, UnicodeError) as error:
-        raise ValueError(f'Invalid review index {path}: {error}') from error
-    if not isinstance(data, dict) or not isinstance(data.get('to_be_deleted'), list):
-        raise ValueError(f'Invalid review index {path}: expected a to_be_deleted list')
-    marks = data['to_be_deleted']
-    if any(not isinstance(value, str) or not value or PurePosixPath(value).is_absolute()
-           or '..' in PurePosixPath(value).parts for value in marks):
-        raise ValueError(f'Invalid review index {path}: expected relative image paths')
-    return set(marks)
+    with database(library) as connection:
+        return {row[0] for row in connection.execute('SELECT path FROM photos WHERE to_be_deleted = 1')}
 
 
 def review_path(library: Path, image: Path) -> str:
     return Path(os.path.abspath(image)).relative_to(Path(os.path.abspath(library))).as_posix()
 
 
+def is_marked_for_deletion(library: Path, image: Path) -> bool:
+    relative = validate_paths([review_path(library, image)])[0]
+    with database(library) as connection:
+        row = connection.execute('SELECT to_be_deleted FROM photos WHERE path = ?', (relative,)).fetchone()
+        return bool(row and row[0])
+
+
 def set_deletion_mark(library: Path, image: Path, marked: bool) -> None:
-    relative = review_path(library, image)
-    marks = read_deletion_marks(library)
-    if marked:
-        marks.add(relative)
-    else:
-        marks.discard(relative)
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=library,
-                                         prefix='.review-', suffix='.tmp', delete=False) as output:
-            temporary = Path(output.name)
-            json.dump({'to_be_deleted': sorted(marks)}, output, indent=2, ensure_ascii=False)
-            output.write('\n')
-        os.replace(temporary, library / 'review.json')
-    finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+    relative = validate_paths([review_path(library, image)])[0]
+    with database(library, write=True) as connection:
+        connection.execute('''INSERT INTO photos(path, to_be_deleted) VALUES (?, ?)
+            ON CONFLICT(path) DO UPDATE SET to_be_deleted = excluded.to_be_deleted''',
+                           (relative, int(marked)))
+
+
+def read_rating(library: Path, image: Path) -> int | None:
+    """None means no library override; zero is an explicitly unrated photo."""
+    relative = validate_paths([review_path(library, image)])[0]
+    with database(library) as connection:
+        row = connection.execute('SELECT rating FROM photos WHERE path = ?', (relative,)).fetchone()
+        return row[0] if row else None
+
+
+def set_rating(library: Path, image: Path, rating: int) -> None:
+    if type(rating) is not int or not 0 <= rating <= 5:
+        raise ValueError('Rating must be an integer between 0 and 5')
+    relative = validate_paths([review_path(library, image)])[0]
+    with database(library, write=True) as connection:
+        connection.execute('''INSERT INTO photos(path, rating) VALUES (?, ?)
+            ON CONFLICT(path) DO UPDATE SET rating = excluded.rating''', (relative, rating))

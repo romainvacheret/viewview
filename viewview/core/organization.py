@@ -7,7 +7,8 @@ import errno
 import os
 
 from .metadata import HANDLED_FORMATS, ImageMetadataReader
-from .tags import read_tags, write_tags
+from .tags import add_tags
+from .library_db import DATABASE_NAME, validate_database
 
 
 @dataclass(frozen=True)
@@ -177,15 +178,16 @@ def import_images(
     tag_names = list(dict.fromkeys(([tag] if tag is not None else []) + list(tags)))
     if any(not name.strip() for name in tag_names):
         raise ValueError('Tag must not be empty or whitespace')
-    tag_index = read_tags(destination) if tag_names else None
-    if tag_index is not None:
+    if tag_names:
+        validate_database(destination)
         _check_writable_directory(destination)
+        database_path = destination / DATABASE_NAME
+        if database_path.exists() and not os.access(database_path, os.W_OK):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(database_path))
     plan = organize_images(list_images(source, HANDLED_FORMATS), destination,
                            move=move, apply=True, dry_run=dry_run)
-    if tag_index is not None and not dry_run:
+    if tag_names and not dry_run:
         paths = {file.destination.relative_to(destination).as_posix()
                  for file in plan.files + plan.identical_files}
-        for name in tag_names:
-            tag_index[name] = sorted(set(tag_index.get(name, [])) | paths)
-        write_tags(destination, tag_index)
+        add_tags(destination, tag_names, sorted(paths))
     return plan

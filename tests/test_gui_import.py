@@ -7,7 +7,6 @@ import unittest
 
 
 def check_import_gui():
-    import json
     import shutil
     import tempfile
     import threading
@@ -18,6 +17,7 @@ def check_import_gui():
     from PySide6 import QtCore, QtTest, QtWidgets
     from viewview.gui import MainWidget
     from viewview.import_gui import import_images, parse_tags
+    from viewview.core.tags import read_tags
 
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
@@ -115,7 +115,7 @@ def check_import_gui():
             self.assertEqual(len(self.widget.file_management._image_items), 3)
             self.assertIn('Copied 2 files', self.importer.result_label.text())
             paths = ['2026/07/01/existing.jpg', '2026/07/02/new.jpg', '_undated/undated.png']
-            self.assertEqual(json.loads((self.destination / 'tags.json').read_text()),
+            self.assertEqual(read_tags(self.destination),
                              {'Summer holiday': paths, 'family': paths})
             self.assertEqual(len(list(self.destination.glob('import-report-*.json'))), 1)
             self.assertEqual(len(self.importer._plan.files), 0)
