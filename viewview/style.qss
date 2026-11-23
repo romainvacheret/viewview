@@ -75,12 +75,27 @@ ImageDisplayWidget {
     border-radius: 10px;
 }
 
-MetadataWidget {
+MetadataWidget, #metadata-content, MetadataWidget QScrollArea {
+    background-color: #11151b;
+    border: none;
+}
+
+ImageInfoWidget, AppInfoWidget {
+    color: #e3e9f0;
     background-color: #191f28;
     border: 1px solid #2b3441;
     border-radius: 10px;
+    margin-top: 12px;
     padding: 14px 10px;
-    margin: 0px;
+}
+
+ImageInfoWidget::title, AppInfoWidget::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    padding: 0px 6px;
+    color: #dce7f0;
+    font-weight: 600;
 }
 
 MetadataWidget QLabel {
@@ -377,4 +392,70 @@ ThumbnailView::item:selected {
     color: #e6fff9;
     background-color: #223e43;
     border-color: #68b6a7;
+}
+
+TagInput {
+    color: #e3e9f0;
+    background-color: #11151b;
+    border: 1px solid #425063;
+    border-radius: 6px;
+    padding: 8px;
+    selection-color: #effffc;
+    selection-background-color: #244b50;
+}
+
+TagInput:focus {
+    border-color: #68b6a7;
+}
+
+TagInput:disabled {
+    color: #778697;
+    border-color: #2b3441;
+}
+
+TagEditor QLabel {
+    padding: 0px;
+}
+
+#tags-empty {
+    color: #8392a5;
+}
+
+#tag-chip {
+    background-color: #223e43;
+    border: 1px solid #3b6668;
+    border-radius: 6px;
+}
+
+#tag-chip QLabel {
+    color: #e6fff9;
+    background: transparent;
+    border: none;
+    padding: 0px;
+}
+
+#tag-chip QToolButton {
+    color: #d3e8e3;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    font-size: 17px;
+}
+
+#tag-chip QToolButton:hover {
+    color: #ffffff;
+    background-color: #3b6265;
+}
+
+#tag-completions {
+    color: #e3e9f0;
+    background-color: #191f28;
+    border: 1px solid #425063;
+    selection-color: #effffc;
+    selection-background-color: #244b50;
+    outline: 0;
+}
+
+#tag-completions::item {
+    padding: 7px 10px;
 }

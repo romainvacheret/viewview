@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from viewview.core.library_db import DATABASE_NAME, database, insert_tags
 from viewview.core.review import read_deletion_marks, set_deletion_mark, read_rating, set_rating
-from viewview.core.tags import add_tags, read_tags
+from viewview.core.tags import add_tags, read_tags, photo_tags, tag_names, remove_photo_tag
 
 
 class LibraryDatabaseTests(unittest.TestCase):
@@ -181,3 +181,29 @@ class LibraryDatabaseTests(unittest.TestCase):
         self.assertEqual(read_deletion_marks(self.root), {self.photo})
         set_rating(self.root, self.root / self.photo, 4)
         self.assertEqual(read_rating(self.root, self.root / self.photo), 4)
+
+    def test_photo_tag_removal_preserves_other_photos_rating_and_review(self):
+        other = '2026/07/12/other.jpg'
+        add_tags(self.root, ['family', 'Summer holiday'], [self.photo, other])
+        set_rating(self.root, self.root / self.photo, 4)
+        set_deletion_mark(self.root, self.root / self.photo, True)
+        remove_photo_tag(self.root, self.photo, 'family')
+        self.assertEqual(photo_tags(self.root, self.photo), ['Summer holiday'])
+        self.assertEqual(photo_tags(self.root, other), ['family', 'Summer holiday'])
+        self.assertEqual(read_rating(self.root, self.root / self.photo), 4)
+        self.assertEqual(read_deletion_marks(self.root), {self.photo})
+        remove_photo_tag(self.root, other, 'family')
+        self.assertIn('family', tag_names(self.root))
+        self.assertEqual(read_tags(self.root)['family'], [])
+
+    def test_photo_tags_are_library_local_and_validate_paths(self):
+        self.assertEqual(photo_tags(self.root, self.photo), [])
+        self.assertEqual(tag_names(self.root), [])
+        self.assertFalse(self.database.exists())
+        with self.assertRaises(ValueError):
+            remove_photo_tag(self.root, '../outside.jpg', 'family')
+        self.assertFalse(self.database.exists())
+        add_tags(self.root, ['Été', 'family trip'], [self.photo])
+        self.assertEqual(set(photo_tags(self.root, self.photo)), {'Été', 'family trip'})
+        other = self.root / 'other-library'
+        self.assertEqual(tag_names(other), [])

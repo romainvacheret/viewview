@@ -25,6 +25,16 @@ and are stored with tags in the library's `viewview.sqlite3` database. Image
 paths are relative to the library root, so moving the whole library preserves
 its metadata.
 
+The right sidebar has two sections: **Image info** shows metadata from the image
+file, while **App info** contains its library rating, deletion mark, and tags.
+To add a tag, type its full name (spaces are allowed) and press **Enter**. Each
+assigned tag appears as a chip; click its **×** to remove it from this picture.
+Other pictures keep their tags, and the tag remains in the library vocabulary.
+Existing tags are suggested as you type: press **Tab** to complete and add the
+highlighted suggestion, or use the arrow keys to choose another suggestion first.
+Suggestions belong to the current library. The **X** deletion shortcut is inactive
+while editing text, so tag names containing that letter can be typed normally.
+
 The right panel's **Rating** control has five clickable stars. Click the fourth
 star for a rating of 4, another star to change it, or the current rating's star
 again to clear it. Selected stars are white; unselected stars are transparent

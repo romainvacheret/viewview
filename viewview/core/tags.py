@@ -20,3 +20,23 @@ def add_tags(destination: Path, names, paths) -> None:
     paths = validate_paths(paths)
     with database(destination, write=True) as connection:
         insert_tags(connection, names, paths)
+
+
+def photo_tags(library: Path, path: str) -> list[str]:
+    path = validate_paths([path])[0]
+    with database(library) as connection:
+        return [row[0] for row in connection.execute(
+            'SELECT tag_name FROM photo_tags WHERE photo_path = ? ORDER BY tag_name COLLATE NOCASE, tag_name',
+            (path,))]
+
+
+def tag_names(library: Path) -> list[str]:
+    with database(library) as connection:
+        return [row[0] for row in connection.execute('SELECT name FROM tags ORDER BY name COLLATE NOCASE, name')]
+
+
+def remove_photo_tag(library: Path, path: str, name: str) -> None:
+    """Remove only this photo's association; keep the library's tag vocabulary."""
+    path = validate_paths([path])[0]
+    with database(library, write=True) as connection:
+        connection.execute('DELETE FROM photo_tags WHERE photo_path = ? AND tag_name = ?', (path, name))

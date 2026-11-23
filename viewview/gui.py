@@ -16,6 +16,9 @@ from PySide6 import QtCore, QtWidgets, QtGui
 
 from .import_gui import ImportWidget
 from .grid import GridWidget
+from .tag_editor import TagEditor
+from .core.tags import add_tags, photo_tags, tag_names, remove_photo_tag
+from .core.review import review_path
 from .core.review import is_marked_for_deletion, set_deletion_mark, read_rating, set_rating
 
 register_heif_opener()
@@ -149,70 +152,129 @@ class StarRatingWidget(QtWidgets.QWidget):
             star.update()
 
 
-class MetadataWidget(QtWidgets.QGroupBox):
-    def __init__(self, parent: 'MainWidget'):
-        super().__init__('', parent)
-        self._layout = QtWidgets.QFormLayout(self)
-        self._layout.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignLeft |
-            QtCore.Qt.AlignmentFlag.AlignTop)
-        self._layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
-        self._layout.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
-        self._parent = parent
-        self._metadata_handler = MetadataHandler()
+def _metadata_label(text, role):
+    label = QtWidgets.QLabel(text)
+    label.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+    label.setProperty('role', role)
+    label.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored if role == 'description'
+                        else QtWidgets.QSizePolicy.Policy.Preferred,
+                        QtWidgets.QSizePolicy.Policy.Preferred)
+    label.setMinimumWidth(0)
+    return label
 
-        def _init_label(text: str, role: str):
-            label = QtWidgets.QLabel(text)
 
-            hor_policy = QtWidgets.QSizePolicy.Policy.Ignored \
-                if role == 'description' else QtWidgets.QSizePolicy.Policy.Preferred
-            label.setSizePolicy(hor_policy, QtWidgets.QSizePolicy.Policy.Preferred)
-            label.setMinimumWidth(0)
-            # Required define role based style
-            label.setProperty('role', role)
-            return label
+def _form_width(widget, form):
+    labels, values = [], []
+    for row in range(form.rowCount()):
+        labels.append(form.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole).widget().sizeHint().width())
+        values.append(form.itemAt(row, QtWidgets.QFormLayout.ItemRole.FieldRole).widget().sizeHint().width())
+    margins = form.contentsMargins()
+    frame = widget.width() - widget.contentsRect().width()
+    return (max(labels) + max(values) + max(0, form.horizontalSpacing())
+            + margins.left() + margins.right() + frame + 24)
 
-        self._datew = _init_label('', 'description')
-        self._ratingw = StarRatingWidget()
-        self._ratingw.setEnabled(False)
-        self._ratingw.valueChanged.connect(parent.set_rating)
-        self._image_rating = 0
-        self._descriptionw = _init_label('', 'description')
-        self._cameraw = _init_label('', 'description')
-        self._softwarew = _init_label('', 'description')
-        self._copyrightw = _init_label('', 'description')
-        self._dimensionw = _init_label('', 'description')
 
-        # Need to 'manually' create the title labels to give them a style
-        date_title = _init_label('Date', 'title')
-        rating_title = _init_label('Rating', 'title')
-        description_title = _init_label('Description', 'title')
-        camera_title = _init_label('Camera', 'title')
-        software_title = _init_label('Software', 'title')
-        copyright_title = _init_label('Copyright', 'title')
-        dimension_title = _init_label('Dimension', 'title')
+class ImageInfoWidget(QtWidgets.QGroupBox):
+    def __init__(self):
+        super().__init__('Image info')
+        self.form = QtWidgets.QFormLayout(self)
+        self.form.setFormAlignment(QtCore.Qt.AlignmentFlag.AlignLeft | QtCore.Qt.AlignmentFlag.AlignTop)
+        self.form.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
+        self.form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.handler = MetadataHandler()
+        self.fields = {}
+        for name, title in (('_datew', 'Date'), ('_descriptionw', 'Description'), ('_cameraw', 'Camera'),
+                            ('_softwarew', 'Software'), ('_copyrightw', 'Copyright'), ('_dimensionw', 'Dimension')):
+            label = _metadata_label('', 'description')
+            self.fields[name] = label
+            self.form.addRow(_metadata_label(title, 'title'), label)
 
-        self._layout.addRow(date_title, self._datew)
-        self._layout.addRow(rating_title, self._ratingw)
-        self._layout.addRow(description_title, self._descriptionw)
-        self._layout.addRow(camera_title, self._cameraw)
-        self._layout.addRow(software_title, self._softwarew)
-        self._layout.addRow(copyright_title, self._copyrightw)
-        self._layout.addRow(dimension_title, self._dimensionw)
+    def update_info(self, image_path):
+        info = self.handler.read_metadata(image_path)
+        if info is None:
+            return 0
+        meta = info.metadata
+        values = {'_datew': meta.intial_date.strftime('%d/%m/%Y') if meta.intial_date else '',
+                  '_descriptionw': meta.description, '_cameraw': meta.camera, '_softwarew': meta.software,
+                  '_copyrightw': meta.copyright, '_dimensionw': f'{info.width}x{info.height}'}
+        for name, value in values.items():
+            self.fields[name].setText(str(value))
+        try:
+            return max(0, min(5, int(meta.rating)))
+        except (ValueError, TypeError, OverflowError):
+            return 0
+
+    def content_width(self):
+        return _form_width(self, self.form)
+
+
+class AppInfoWidget(QtWidgets.QGroupBox):
+    def __init__(self, controller):
+        super().__init__('App info')
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setSpacing(10)
+        self.form = QtWidgets.QFormLayout()
+        self.form.setFieldGrowthPolicy(QtWidgets.QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self.rating = StarRatingWidget()
+        self.rating.setEnabled(False)
+        self.rating.valueChanged.connect(controller.set_rating)
         self.deletion_checkbox = QtWidgets.QCheckBox('To be deleted')
         self.deletion_checkbox.setEnabled(False)
         self.deletion_checkbox.setToolTip('Press X to toggle the deletion mark and advance.')
-        self.deletion_checkbox.clicked.connect(parent.set_deletion_mark)
-        self.review_error = QtWidgets.QLabel()
-        self.review_error.setObjectName('review-error')
-        self.review_error.setTextFormat(QtCore.Qt.TextFormat.PlainText)
-        self.review_error.setWordWrap(True)
-        self.review_error.hide()
-        review = QtWidgets.QWidget()
-        review_layout = QtWidgets.QVBoxLayout(review)
-        review_layout.setContentsMargins(0, 0, 0, 0)
-        review_layout.addWidget(self.deletion_checkbox)
-        review_layout.addWidget(self.review_error)
-        self._layout.addRow(_init_label('Review', 'title'), review)
+        self.deletion_checkbox.clicked.connect(controller.set_deletion_mark)
+        self.form.addRow(_metadata_label('Rating', 'title'), self.rating)
+        self.form.addRow(_metadata_label('Review', 'title'), self.deletion_checkbox)
+        layout.addLayout(self.form)
+        layout.addWidget(_metadata_label('Tags', 'title'))
+        self.tags = TagEditor()
+        self.tags.tag_added.connect(controller.add_photo_tag)
+        self.tags.tag_removed.connect(controller.remove_photo_tag)
+        self.tags.suggestions_requested.connect(controller.refresh_tag_suggestions)
+        layout.addWidget(self.tags)
+        self.error = QtWidgets.QLabel()
+        self.error.setObjectName('review-error')
+        self.error.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.error.setWordWrap(True)
+        self.error.hide()
+        layout.addWidget(self.error)
+
+    def content_width(self):
+        margins = self.layout().contentsMargins()
+        frame = self.width() - self.contentsRect().width()
+        return max(_form_width(self, self.form),
+                   self.tags.content_width() + margins.left() + margins.right() + frame + 24)
+
+
+class MetadataWidget(QtWidgets.QWidget):
+    """Shared sidebar coordinating file-derived and library-owned information."""
+    def __init__(self, parent: 'MainWidget'):
+        super().__init__(parent)
+        self._image_rating = 0
+        self.file_info = ImageInfoWidget()
+        self.app_info = AppInfoWidget(parent)
+        # Keep the sidebar's existing field interface for selection/review logic.
+        for name, field in self.file_info.fields.items():
+            setattr(self, name, field)
+        self._ratingw = self.app_info.rating
+        self.deletion_checkbox = self.app_info.deletion_checkbox
+        self.review_error = self.app_info.error
+        self.tags_editor = self.app_info.tags
+        content = QtWidgets.QWidget()
+        content.setObjectName('metadata-content')
+        content_layout = QtWidgets.QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(12)
+        content_layout.addWidget(self.file_info)
+        content_layout.addWidget(self.app_info)
+        content_layout.addStretch()
+        self.scroll = QtWidgets.QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        self.scroll.setWidget(content)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.scroll)
 
     def set_review_state(self, marked: bool, enabled: bool, error: str = ''):
         self.deletion_checkbox.setChecked(marked)
@@ -227,42 +289,24 @@ class MetadataWidget(QtWidgets.QGroupBox):
         self._ratingw.setEnabled(enabled)
 
     def update_info(self, image_path: pathlib.Path):
-        print(image_path)
-        # TODO: path should never be None but check
-        metadata = self._metadata_handler.read_metadata(image_path)
-        # TODO: handle case an error occurs
-        if metadata is None:
-            return
-
-        meta = metadata.metadata
-
-        self._datew.setText(meta.intial_date.strftime("%d/%m/%Y") 
-                            if meta.intial_date is not None else '')
-        try:
-            self._image_rating = max(0, min(5, int(meta.rating)))
-        except (ValueError, TypeError, OverflowError):
-            self._image_rating = 0
+        self._image_rating = self.file_info.update_info(image_path)
         self.set_rating_state(self._image_rating, False)
-        self._descriptionw.setText(meta.description)
-        self._cameraw.setText(meta.camera)
-        self._softwarew.setText(meta.software)
-        self._copyrightw.setText(meta.copyright)
-        self._dimensionw.setText(f'{metadata.width}x{metadata.height}')
         self.update_width_limit()
+
+    def minimumSizeHint(self):
+        size = super().minimumSizeHint()
+        if hasattr(self, 'app_info'):
+            scrollbar = self.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent)
+            size.setWidth(max(self.file_info.minimumSizeHint().width(),
+                              self.app_info.minimumSizeHint().width()) + scrollbar)
+        return size
 
     def update_width_limit(self):
         self.ensurePolished()
-        labels = []
-        values = []
-        for row in range(self._layout.rowCount()):
-            labels.append(self._layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
-                          .widget().sizeHint().width())
-            values.append(self._layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.FieldRole)
-                          .widget().sizeHint().width())
-        margins = self._layout.contentsMargins()
-        frame = self.width() - self.contentsRect().width()
-        width = (max(labels) + max(values) + max(0, self._layout.horizontalSpacing())
-                 + margins.left() + margins.right() + frame + 24)
+        self.file_info.ensurePolished()
+        self.app_info.ensurePolished()
+        scrollbar = self.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent)
+        width = max(self.file_info.content_width(), self.app_info.content_width()) + scrollbar
         self.setMaximumWidth(max(self.minimumSizeHint().width(), width))
 
 
@@ -631,6 +675,7 @@ class MainWidget(QtWidgets.QWidget):
         self._mark_shortcut.activated.connect(self.mark_and_advance)
         self._mark_shortcut.setEnabled(False)
         self.tabs.currentChanged.connect(self._update_mark_shortcut)
+        QtWidgets.QApplication.instance().focusChanged.connect(self._update_mark_shortcut)
 
         self._layout = QtWidgets.QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -662,6 +707,8 @@ class MainWidget(QtWidgets.QWidget):
     def _refresh_library(self):
         if hasattr(self.file_management, '_selected_folder'):
             self.file_management._update_list()
+            if self.image_path is not None:
+                self._load_review_state()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         if self.import_widget.is_busy:
@@ -724,6 +771,7 @@ class MainWidget(QtWidgets.QWidget):
         self._displayed_image = None
         self.image_display.clear()
         self._clear_metadata()
+        self.metadata.tags_editor.set_tags([], [], False)
         self._marked_for_deletion = False
         self.metadata.set_review_state(False, False)
         self._update_mark_shortcut()
@@ -753,7 +801,11 @@ class MainWidget(QtWidgets.QWidget):
         self.select_grid_folder(_folder)
 
     def _update_mark_shortcut(self, *_):
+        focus = QtWidgets.QApplication.focusWidget()
+        editing = (isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit))
+                   or self.metadata.tags_editor.input.completer().popup().isVisible())
         self._mark_shortcut.setEnabled(self.tabs.currentIndex() == 0
+                                      and not editing
                                       and self.metadata.deletion_checkbox.isEnabled())
 
     def _load_review_state(self):
@@ -773,6 +825,7 @@ class MainWidget(QtWidgets.QWidget):
                 error = f'Could not load review marks: {failure}'
         self.metadata.set_review_state(self._marked_for_deletion, enabled, error)
         self.metadata.set_rating_state(self._saved_rating, enabled)
+        self._load_tags(enabled)
         self._update_mark_shortcut()
 
     def set_deletion_mark(self, marked: bool) -> bool:
@@ -788,6 +841,54 @@ class MainWidget(QtWidgets.QWidget):
         self._marked_for_deletion = marked
         self.metadata.set_review_state(marked, True)
         return True
+
+    def _load_tags(self, enabled=True):
+        library = getattr(self.file_management, '_selected_folder', None)
+        if not enabled or library is None or self.image_path is None:
+            self.metadata.tags_editor.set_tags([], [], False)
+            return
+        try:
+            names = photo_tags(library, review_path(library, self.image_path))
+            known = tag_names(library)
+        except (OSError, ValueError) as failure:
+            self.metadata.tags_editor.set_tags([], [], False)
+            self.metadata.review_error.setText(f'Could not load tags: {failure}')
+            self.metadata.review_error.show()
+        else:
+            self.metadata.tags_editor.set_tags(names, known, True)
+        self.metadata.update_width_limit()
+
+    def refresh_tag_suggestions(self):
+        library = getattr(self.file_management, '_selected_folder', None)
+        if library is not None and self.metadata.tags_editor.isEnabled():
+            try:
+                self.metadata.tags_editor.set_suggestions(tag_names(library))
+            except (OSError, ValueError) as failure:
+                self.metadata.review_error.setText(f'Could not load tag suggestions: {failure}')
+                self.metadata.review_error.show()
+
+    def _change_photo_tag(self, name, remove=False):
+        library = getattr(self.file_management, '_selected_folder', None)
+        if library is None or self.image_path is None or not self.metadata.tags_editor.isEnabled():
+            return
+        try:
+            path = review_path(library, self.image_path)
+            if remove:
+                remove_photo_tag(library, path, name)
+            else:
+                add_tags(library, [name], [path])
+        except (OSError, ValueError) as failure:
+            self.metadata.review_error.setText(f'Could not save tag: {failure}')
+            self.metadata.review_error.show()
+            return
+        self._load_tags()
+        self.metadata.set_review_state(self._marked_for_deletion, True)
+
+    def add_photo_tag(self, name):
+        self._change_photo_tag(name)
+
+    def remove_photo_tag(self, name):
+        self._change_photo_tag(name, remove=True)
 
     def mark_and_advance(self):
         if self.tabs.currentIndex() == 0 and self.set_deletion_mark(not self._marked_for_deletion):
