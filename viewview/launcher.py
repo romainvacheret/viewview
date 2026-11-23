@@ -13,6 +13,7 @@ def _smoke_test():
     import os
     from pathlib import Path
     import tempfile
+    import time
 
     os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
     from PIL import Image
@@ -44,6 +45,14 @@ def _smoke_test():
         if (read_deletion_marks(library) != {path.name} or read_rating(library, path) != 4
                 or read_tags(library) != {'Bundle check': [path.name]}):
             raise RuntimeError('Packaged SQLite metadata storage failed')
+        widget.grid.set_folder(library, sorted(library.glob('check.*')))
+        widget.view_tabs.setCurrentIndex(1)
+        deadline = time.monotonic() + 10
+        while len(widget.grid.model.cache) < 3 and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        if len(widget.grid.model.cache) != 3 or widget.grid.model.errors:
+            raise RuntimeError('Packaged grid thumbnail decoding failed')
     widget.close()
-    print('Viewview bundle check passed: Qt, stylesheet, JPEG, PNG, HEIC, SQLite')
+    print('Viewview bundle check passed: Qt, stylesheet, JPEG, PNG, HEIC, SQLite, grid previews')
     return 0

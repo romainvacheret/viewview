@@ -3,9 +3,19 @@
 The GUI displays JPEG (`.jpg`, `.jpeg`), PNG, and HEIC/HEIF pictures, including
 uppercase extensions and pictures in subdirectories. HEIC/HEIF decoding uses
 `pillow-heif` (libheif), included in the Nix shell and pip requirements.
-The left panel shows a folder tree: click a folder or its arrow to expand or
-collapse it, and click a picture to display it. Full-path tooltips remain
+The left panel shows a folder tree: single-click a folder to select it and update
+the grid; double-click its name to expand or collapse it in either viewer subtab.
+Disclosure arrows expand or collapse with a single click. Click a picture to
+display it. Full-path tooltips remain
 available for folders and pictures.
+
+Inside **Viewer**, the center has **Single picture** and **Grid** tabs sharing
+the same side panels. The grid follows the folder clicked in the left tree and
+includes all pictures in its subfolders, in tree order even when those folders
+are collapsed. Scroll vertically to see more previews. Single-click a thumbnail
+to select it and edit its rating or deletion mark; double-click to open it in
+Single picture. In Grid, **X** toggles the deletion mark and advances within that
+grid's pictures. Previews load in the background with a bounded memory cache.
 
 In the Viewer tab, the right panel's **To be deleted** checkbox saves a review
 mark without deleting the file. Press **X** to toggle the current picture's mark and
@@ -99,7 +109,8 @@ result/Viewview.app/Contents/MacOS/Viewview --smoke-test
 ```
 
 The check starts Qt offscreen, loads the bundled stylesheet, and exercises JPEG,
-PNG, HEIC encoding/decoding, and SQLite tag/review persistence. The macOS build also rejects Mach-O dependency
+PNG, HEIC encoding/decoding, SQLite tag/review persistence, and background grid
+previews. The macOS build also rejects Mach-O dependency
 paths and RPATHs that still point into `/nix/store`.
 
 [Build portable applications](.github/workflows/build.yml) runs tests and native

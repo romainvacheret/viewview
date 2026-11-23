@@ -15,6 +15,7 @@ from pillow_heif import register_heif_opener
 from PySide6 import QtCore, QtWidgets, QtGui
 
 from .import_gui import ImportWidget
+from .grid import GridWidget
 from .core.review import is_marked_for_deletion, set_deletion_mark, read_rating, set_rating
 
 register_heif_opener()
@@ -272,7 +273,7 @@ class PathTreeWidget(QtWidgets.QTreeWidget):
         self.setHeaderHidden(True)
         self.setIndentation(18)
         self.setUniformRowHeights(True)
-        self.setExpandsOnDoubleClick(False)
+        self.setExpandsOnDoubleClick(True)
 
     def viewportEvent(self, event):
         if event.type() == QtCore.QEvent.Type.ToolTip:
@@ -295,6 +296,7 @@ class PathTreeWidget(QtWidgets.QTreeWidget):
 
 class FileManagementWidget(QtWidgets.QWidget):
     folder_selected = QtCore.Signal(object)
+    contents_changed = QtCore.Signal()
 
     def __init__(self, parent: 'MainWidget'):
         super().__init__(parent)
@@ -346,7 +348,7 @@ class FileManagementWidget(QtWidgets.QWidget):
     def _item_clicked(self, item, _column):
         path = item.data(0, QtCore.Qt.ItemDataRole.UserRole)
         if path in self._folder_items:
-            item.setExpanded(not item.isExpanded())
+            self._parent.select_grid_folder(path)
         else:
             self._parent.set_current_image(path)
 
@@ -396,6 +398,8 @@ class FileManagementWidget(QtWidgets.QWidget):
                     self._list.setCurrentItem(item)
                     break
         self.update_width_limit()
+
+        self.contents_changed.emit()
 
     def update_width_limit(self):
         self.ensurePolished()
@@ -460,7 +464,10 @@ class ImageDisplayWidget(QtWidgets.QLabel):
                 self._pixel_map = QtGui.QPixmap.fromImage(ImageQt(image.convert('RGBA')))
         else:
             reader = QtGui.QImageReader(str(img_path))
+            reader.setAutoTransform(True)
             self._pixel_map = QtGui.QPixmap.fromImage(reader.read())
+            if self._pixel_map.isNull():
+                raise ValueError(reader.errorString())
 
         scaled = self._pixel_map.scaled(
             self.size(),
@@ -579,16 +586,31 @@ class MainWidget(QtWidgets.QWidget):
         self._initial_sizes_set = False
 
         self.image_path: Optional[pathlib.Path] = None
+        self._displayed_image = None
+        self._grid_folder = None
         self._marked_for_deletion = False
 
         self.image_display = ImageDisplayWidget()
         self.file_management = FileManagementWidget(self)
         self.metadata = MetadataWidget(self)
 
+        self.grid = GridWidget()
+        self.view_tabs = QtWidgets.QTabWidget()
+        self.view_tabs.setObjectName('picture-views')
+        self.view_tabs.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                                     QtWidgets.QSizePolicy.Policy.Ignored)
+        self.view_tabs.setMinimumSize(1, 1)
+        self.view_tabs.addTab(self.image_display, 'Single picture')
+        self.view_tabs.addTab(self.grid, 'Grid')
+        self.view_tabs.currentChanged.connect(self._view_changed)
+        self.grid.image_selected.connect(self.set_current_image)
+        self.grid.image_activated.connect(self._open_grid_image)
+        self.file_management.contents_changed.connect(self._refresh_grid_paths)
+
         self._splitter = ToggleSplitter(QtCore.Qt.Orientation.Horizontal)
         self._splitter.setHandleWidth(12)
         self._splitter.addWidget(self.file_management)
-        self._splitter.addWidget(self.image_display)
+        self._splitter.addWidget(self.view_tabs)
         self._splitter.addWidget(self.metadata)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
@@ -646,6 +668,7 @@ class MainWidget(QtWidgets.QWidget):
             self.import_widget.result_label.setText('Please wait for the current import check or operation to finish before closing.')
             event.ignore()
         else:
+            self.grid.shutdown()
             super().closeEvent(event)
 
     def select_folder(self):
@@ -653,18 +676,81 @@ class MainWidget(QtWidgets.QWidget):
 
     def set_current_image(self, image: pathlib.Path):
         self.image_path = image
-        self.image_display.display_image(image)
-        self.metadata.update_info(image)
+        error = ''
+        try:
+            self.metadata.update_info(image)
+        except (OSError, ValueError) as failure:
+            self._clear_metadata()
+            error = f'Unable to read picture: {failure}'
+        self._displayed_image = None
+        if self.view_tabs.currentIndex() == 0:
+            self._display_current_image()
         self.file_management.select_image(image)
+        if image not in self.grid.model.rows and hasattr(self.file_management, '_selected_folder'):
+            self.select_grid_folder(image.parent)
+        self.grid.select_image(image)
         self._load_review_state()
+        if error:
+            self.metadata.review_error.setText(error)
+            self.metadata.review_error.show()
 
-    def _library_changed(self, _folder):
+    def _display_current_image(self):
+        if self.image_path is None:
+            return
+        try:
+            self.image_display.display_image(self.image_path)
+        except (OSError, ValueError) as failure:
+            self.image_display.clear()
+            self.image_display.setText(f'Unable to display this picture.\n{failure}')
+        self._displayed_image = self.image_path
+
+    def _view_changed(self, index):
+        if index == 0 and self._displayed_image != self.image_path:
+            self._display_current_image()
+
+    def _open_grid_image(self, image):
+        if self.image_path != image:
+            self.set_current_image(image)
+        self.view_tabs.setCurrentIndex(0)
+
+    def _clear_metadata(self):
+        for field in ('_datew', '_descriptionw', '_cameraw', '_softwarew', '_copyrightw', '_dimensionw'):
+            getattr(self.metadata, field).clear()
+        self.metadata._image_rating = 0
+        self.metadata.set_rating_state(0, False)
+
+    def _clear_current_image(self):
         self.image_path = None
+        self._displayed_image = None
         self.image_display.clear()
+        self._clear_metadata()
         self._marked_for_deletion = False
         self.metadata.set_review_state(False, False)
-        self.metadata.set_rating_state(0, False)
         self._update_mark_shortcut()
+
+    def select_grid_folder(self, folder, *, refresh=False):
+        self._grid_folder = folder
+        paths = [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                 for item in self.file_management._image_items
+                 if item.data(0, QtCore.Qt.ItemDataRole.UserRole).is_relative_to(folder)]
+        self.grid.set_folder(folder, paths, refresh=refresh)
+        if self.image_path is not None and self.image_path not in self.grid.model.rows:
+            self._clear_current_image()
+        elif self.image_path is not None:
+            self.grid.select_image(self.image_path)
+
+    def _refresh_grid_paths(self):
+        root = getattr(self.file_management, '_selected_folder', None)
+        if root is None:
+            return
+        folder = self._grid_folder
+        if folder not in self.file_management._folder_items:
+            folder = root
+        self.select_grid_folder(folder, refresh=True)
+
+    def _library_changed(self, _folder):
+        self._clear_current_image()
+        self.select_grid_folder(_folder)
 
     def _update_mark_shortcut(self, *_):
         self._mark_shortcut.setEnabled(self.tabs.currentIndex() == 0
@@ -705,7 +791,12 @@ class MainWidget(QtWidgets.QWidget):
 
     def mark_and_advance(self):
         if self.tabs.currentIndex() == 0 and self.set_deletion_mark(not self._marked_for_deletion):
-            self.file_management.select_next_image(self.image_path)
+            if self.view_tabs.currentIndex() == 1:
+                next_image = self.grid.next_image(self.image_path)
+                if next_image is not None:
+                    self.set_current_image(next_image)
+            else:
+                self.file_management.select_next_image(self.image_path)
 
     def set_rating(self, rating: int):
         library = getattr(self.file_management, '_selected_folder', None)

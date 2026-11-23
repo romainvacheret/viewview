@@ -54,22 +54,29 @@ def check_images():
                 self.assertTrue(root_item.isExpanded())
                 self.assertFalse(year.isExpanded())
 
-                def click(item):
+                def click(item, double=False):
                     QtTest.QTest.mouseClick(tree.viewport(), QtCore.Qt.MouseButton.LeftButton,
                                            pos=tree.visualItemRect(item).center())
+                    if double:
+                        QtTest.QTest.mouseDClick(tree.viewport(), QtCore.Qt.MouseButton.LeftButton,
+                                                pos=tree.visualItemRect(item).center())
                     self.app.processEvents()
 
                 click(year)
+                self.assertFalse(year.isExpanded())
+                click(year, double=True)
                 self.assertTrue(year.isExpanded())
-                click(month)
+                click(month, double=True)
                 self.assertTrue(month.isExpanded())
                 click(panel._image_items[0])
                 self.assertEqual(widget.image_path, first)
                 click(year)
+                self.assertTrue(year.isExpanded())
+                click(year, double=True)
                 self.assertFalse(year.isExpanded())
                 self.assertEqual(widget.image_path, first)
 
-                # The native disclosure arrow must toggle once, just like the label.
+                # Disclosure arrows retain their standard single-click toggle.
                 rect = tree.visualItemRect(year)
                 arrow = QtCore.QPoint(rect.left() - tree.indentation() // 2, rect.center().y())
                 QtTest.QTest.mouseClick(tree.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=arrow)

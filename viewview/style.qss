@@ -342,3 +342,39 @@ MetadataWidget QCheckBox:disabled {
 #review-error {
     color: #f2b3a7;
 }
+
+GridWidget {
+    background-color: #11151b;
+}
+
+GridWidget QLabel {
+    color: #aebdcd;
+    background: transparent;
+    padding: 4px;
+}
+
+ThumbnailView {
+    color: #c5d1de;
+    background-color: #0d1117;
+    border: 1px solid #29323e;
+    border-radius: 8px;
+    padding: 8px;
+    outline: 0;
+}
+
+ThumbnailView::item {
+    border: 1px solid transparent;
+    border-radius: 7px;
+    padding: 8px;
+}
+
+ThumbnailView::item:hover {
+    background-color: #202936;
+    border-color: #425063;
+}
+
+ThumbnailView::item:selected {
+    color: #e6fff9;
+    background-color: #223e43;
+    border-color: #68b6a7;
+}
