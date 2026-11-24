@@ -27,6 +27,10 @@ to select it and edit its rating or deletion mark; double-click to open it in
 Single picture. In Grid, **X** toggles the deletion mark and advances within that
 grid's pictures. Previews load in the background with a bounded memory cache.
 
+In Single picture, the image automatically fits the available space when resizing
+the window or dragging, collapsing, or restoring either side panel. Its aspect
+ratio is preserved, and resizing uses the decoded original without reloading it.
+
 The filter bar above the picture tabs filters both the folder tree and grid by
 one library tag, an exact rating (including Unrated) or minimum rating, and
 deletion status. Conditions combine: a picture must match every selected filter.

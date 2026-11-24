@@ -21,6 +21,73 @@ def check_images():
         def setUpClass(cls):
             cls.app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
 
+        def test_picture_fits_panel_and_window_resizing_without_reloading(self):
+            from unittest.mock import patch
+            with tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                path = root / 'wide.png'
+                Image.new('RGB', (1600, 400), 'red').save(path)
+                widget = MainWidget()
+                self.addCleanup(widget.close)
+                widget.resize(1400, 850)
+                widget.show()
+                widget.file_management._selected_folder = root
+                widget.file_management._update_list()
+                widget.set_current_image(path)
+                self.app.processEvents()
+                display = widget.image_display
+                original = display._pixel_map.cacheKey()
+                sizes = set()
+
+                def check_fit():
+                    self.app.processEvents()
+                    shown = display.pixmap().deviceIndependentSize()
+                    available = display.contentsRect().size()
+                    self.assertLessEqual(shown.width(), available.width() + 1)
+                    self.assertLessEqual(shown.height(), available.height() + 1)
+                    self.assertAlmostEqual(shown.width() / shown.height(), 4, delta=0.05)
+                    self.assertTrue(abs(shown.width() - available.width()) <= 1
+                                    or abs(shown.height() - available.height()) <= 1)
+                    self.assertEqual(display._pixel_map.cacheKey(), original)
+                    sizes.add((shown.width(), shown.height()))
+
+                # Resizing uses the decoded original even if the file disappears.
+                path.unlink()
+                with patch.object(display, 'display_image', side_effect=AssertionError('Reloaded image')):
+                    for widths in ([300, 800, 280], [0, 1000, 280], [300, 1000, 0], [300, 600, 280]):
+                        widget._splitter.set_panel_sizes(widths)
+                        check_fit()
+                    widget.resize(1050, 650)
+                    check_fit()
+                    widget.view_tabs.setCurrentIndex(1)
+                    widget.resize(1300, 800)
+                    widget.view_tabs.setCurrentIndex(0)
+                    check_fit()
+                self.assertGreater(len(sizes), 2)
+
+        def test_resize_does_not_restore_cleared_or_failed_picture(self):
+            from viewview.gui import ImageDisplayWidget
+            with tempfile.TemporaryDirectory() as temporary:
+                path = Path(temporary) / 'picture.png'
+                Image.new('RGB', (80, 120), 'blue').save(path)
+                display = ImageDisplayWidget()
+                self.addCleanup(display.close)
+                display.show()
+                for clear in (display.clear, lambda: display.setText('No pictures match these filters.')):
+                    display.display_image(path)
+                    clear()
+                    display.resize(display.width() + 20, display.height() + 20)
+                    self.app.processEvents()
+                    self.assertTrue(display.pixmap().isNull())
+                display.display_image(path)
+                with self.assertRaises(ValueError):
+                    display.display_image(Path(temporary) / 'missing.jpg')
+                display.setText('Unable to display this picture.')
+                display.resize(500, 400)
+                self.app.processEvents()
+                self.assertTrue(display.pixmap().isNull())
+                self.assertEqual(display.text(), 'Unable to display this picture.')
+
         def test_folder_tree_hierarchy_clicks_refresh_and_navigation(self):
             with tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)

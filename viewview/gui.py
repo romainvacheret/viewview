@@ -521,12 +521,14 @@ class FileManagementWidget(QtWidgets.QWidget):
 class ImageDisplayWidget(QtWidgets.QLabel):
     def __init__(self):
         super().__init__()
+        self._pixel_map = QtGui.QPixmap()
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
                            QtWidgets.QSizePolicy.Policy.Ignored)
         self.setMinimumSize(1, 1)
 
     def display_image(self, img_path: pathlib.Path):
+        self.clear()
         if img_path.suffix.lower() in HEIF_IMAGE_FORMATS:
             # Qt's standard image plugins do not decode HEIC. Pillow uses libheif.
             with Image.open(img_path) as image:
@@ -538,13 +540,32 @@ class ImageDisplayWidget(QtWidgets.QLabel):
             if self._pixel_map.isNull():
                 raise ValueError(reader.errorString())
 
+        self._fit_image()
+
+    def _fit_image(self):
+        if self._pixel_map.isNull() or self.contentsRect().isEmpty():
+            return
+        ratio = self.devicePixelRatioF()
         scaled = self._pixel_map.scaled(
-            self.size(),
+            self.contentsRect().size() * ratio,
             QtCore.Qt.AspectRatioMode.KeepAspectRatio,
             QtCore.Qt.TransformationMode.SmoothTransformation
         )
 
+        scaled.setDevicePixelRatio(ratio)
         self.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._fit_image()
+
+    def clear(self):
+        self._pixel_map = QtGui.QPixmap()
+        super().clear()
+
+    def setText(self, text):
+        self._pixel_map = QtGui.QPixmap()
+        super().setText(text)
 
 
 class ToggleSplitterHandle(QtWidgets.QSplitterHandle):
