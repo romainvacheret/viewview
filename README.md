@@ -8,6 +8,16 @@ the grid; double-click its name to expand or collapse it in either viewer subtab
 Disclosure arrows expand or collapse with a single click. Click a picture to
 display it. Full-path tooltips remain
 available for folders and pictures.
+Use **Open folder…** above the tree to switch libraries without restarting.
+The picker starts in the current library; cancelling keeps the current selection.
+If `catalogue.sqlite3` is missing, a dialog asks whether to create it. Declining
+keeps the current library open. Accepting copies metadata from an existing
+`viewview.sqlite3`, leaving that original database untouched.
+Wait for any active import or preview to finish before switching libraries.
+The app remembers the last successfully opened library using Qt's platform
+settings. On startup it reopens that folder if the folder and `catalogue.sqlite3`
+still exist; otherwise it shows the folder picker. Cancelling a folder change
+or declining catalogue creation leaves the saved library unchanged.
 
 Inside **Viewer**, the center has **Single picture** and **Grid** tabs sharing
 the same side panels. The grid follows the folder clicked in the left tree and
@@ -30,7 +40,7 @@ In the Viewer tab, the right panel's **To be deleted** checkbox saves a review
 mark without deleting the file. Press **X** to toggle the current picture's mark and
 select the next picture; on the last picture, it stays selected. Uncheck the box
 to remove a mark. Marks reload when selecting pictures after reopening a library
-and are stored with tags in the library's `viewview.sqlite3` database. Image
+and are stored with tags in the library's `catalogue.sqlite3` database. Image
 paths are relative to the library root, so moving the whole library preserves
 its metadata.
 
@@ -159,7 +169,7 @@ python -m viewview import /path/to/source /path/to/library --tag "Summer holiday
 
 Use `--move` to move files or `--dry-run` to preview without changing either
 folder. Tags are optional. Each tagged import merges its destination paths into
-`viewview.sqlite3` at the library root. Paths are relative and associations are
+`catalogue.sqlite3` at the library root. Paths are relative and associations are
 deduplicated. Identical files
 already in the library receive the tag too; invalid media are excluded. Tag names
 are case-sensitive and cannot be blank. Other tags are preserved. Dry runs validate

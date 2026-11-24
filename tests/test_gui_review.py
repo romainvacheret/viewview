@@ -16,6 +16,10 @@ def check_review_gui():
     from viewview.core.review import read_deletion_marks, review_path, read_rating
     from viewview.core.library_db import DATABASE_NAME
 
+    from unittest.mock import patch
+    patch.object(QtWidgets.QMessageBox, 'question',
+                 return_value=QtWidgets.QMessageBox.StandardButton.Yes).start()
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
 
@@ -31,8 +35,8 @@ def check_review_gui():
             self.paths = [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
                           for item in self.widget.file_management._image_items]
 
-        def open_window(self, root):
-            widget = MainWidget()
+        def open_window(self, root, settings=None):
+            widget = MainWidget(settings=settings)
             widget.resize(1000, 700)
             widget.show()
             self.addCleanup(widget.close)
@@ -158,7 +162,8 @@ def check_review_gui():
             rating = self.widget.metadata._ratingw
             self.assertTrue(rating.isEnabled())
             self.assertEqual(rating.value(), 4)
-            self.assertFalse((self.root / DATABASE_NAME).exists())
+            self.assertEqual(read_deletion_marks(self.root), set())
+            self.assertIsNone(read_rating(self.root, self.paths[0]))
             rating.setValue(5)
             self.assertEqual(read_rating(self.root, first), 5)
             self.widget.set_current_image(second)
@@ -239,7 +244,8 @@ def check_review_gui():
         def test_shortcut_disabled_until_photo_selected_and_on_import_tab(self):
             self.assertFalse(self.widget.metadata.deletion_checkbox.isEnabled())
             self.press_x()
-            self.assertFalse((self.root / DATABASE_NAME).exists())
+            self.assertEqual(read_deletion_marks(self.root), set())
+            self.assertIsNone(read_rating(self.root, self.paths[0]))
             self.widget.set_current_image(self.paths[0])
             self.widget.tabs.setCurrentIndex(1)
             self.assertFalse(self.widget._mark_shortcut.isEnabled())
@@ -247,7 +253,8 @@ def check_review_gui():
             entry.setFocus()
             QtTest.QTest.keyClicks(entry, 'x')
             self.assertEqual(entry.text(), 'x')
-            self.assertFalse((self.root / DATABASE_NAME).exists())
+            self.assertEqual(read_deletion_marks(self.root), set())
+            self.assertIsNone(read_rating(self.root, self.paths[0]))
             self.widget.tabs.setCurrentIndex(0)
             self.assertTrue(self.widget._mark_shortcut.isEnabled())
 
@@ -259,9 +266,11 @@ def check_review_gui():
                 self.press_x()
             self.assertEqual(self.widget.image_path, self.paths[0])
             self.assertIn('Could not save', self.widget.metadata.review_error.text())
-            self.assertFalse((self.root / DATABASE_NAME).exists())
+            self.assertEqual(read_deletion_marks(self.root), set())
+            self.assertIsNone(read_rating(self.root, self.paths[0]))
 
         def test_invalid_index_disables_marks_without_overwriting_it(self):
+            (self.root / DATABASE_NAME).unlink()
             (self.root / 'review.json').write_text('broken')
             self.widget.set_current_image(self.paths[0])
             self.assertFalse(self.widget.metadata.deletion_checkbox.isEnabled())
@@ -285,11 +294,106 @@ def check_review_gui():
             other.mkdir()
             Image.new('RGB', (24, 16), 'blue').save(other / self.paths[0].name)
             with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=str(other)):
-                self.widget.select_folder()
+                self.widget.file_management.open_folder_button.click()
             self.assertIsNone(self.widget.image_path)
+            self.assertEqual(self.widget.file_management._selected_folder, other)
+            self.assertEqual(self.widget.import_widget._destination, other)
+            self.assertEqual(self.widget.grid.model.paths, (other / self.paths[0].name,))
             self.assertFalse(self.widget._mark_shortcut.isEnabled())
             self.widget.set_current_image(other / self.paths[0].name)
             self.assertFalse(self.widget.metadata.deletion_checkbox.isChecked())
+
+        def test_cancel_open_folder_keeps_current_library_and_picture(self):
+            self.widget.set_current_image(self.paths[0])
+            with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value='') as picker:
+                self.widget.file_management.open_folder_button.click()
+            self.assertEqual(picker.call_args.args[2], str(self.root))
+            self.assertEqual(self.widget.file_management._selected_folder, self.root)
+            self.assertEqual(self.widget.image_path, self.paths[0])
+
+        def test_declining_catalogue_creation_keeps_current_library(self):
+            other = self.root / 'new-library'
+            other.mkdir()
+            self.widget.set_current_image(self.paths[0])
+            with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=str(other)):
+                with patch.object(QtWidgets.QMessageBox, 'question',
+                                  return_value=QtWidgets.QMessageBox.StandardButton.No) as question:
+                    self.widget.file_management.open_folder_button.click()
+            question.assert_called_once()
+            self.assertFalse((other / DATABASE_NAME).exists())
+            self.assertEqual(self.widget.image_path, self.paths[0])
+            self.assertEqual(self.widget.file_management._selected_folder, self.root)
+
+        def test_existing_catalogue_does_not_prompt(self):
+            with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=str(self.root)):
+                with patch.object(QtWidgets.QMessageBox, 'question') as question:
+                    self.widget.file_management.open_folder_button.click()
+            question.assert_not_called()
+
+        def test_creation_failure_keeps_library_and_shows_error(self):
+            other = self.root / 'new-library'
+            other.mkdir()
+            with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=str(other)):
+                with patch('viewview.gui.initialize_catalogue', side_effect=PermissionError('Read only')):
+                    with patch.object(QtWidgets.QMessageBox, 'warning') as warning:
+                        self.widget.file_management.open_folder_button.click()
+            warning.assert_called_once()
+            self.assertEqual(self.widget.file_management._selected_folder, self.root)
+
+        def test_cannot_switch_library_during_import_job(self):
+            with patch.object(type(self.widget.import_widget), 'is_busy', new_callable=property,
+                              fget=lambda _: True):
+                with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory') as picker:
+                    self.widget.file_management.open_folder_button.click()
+                picker.assert_not_called()
+            self.assertEqual(self.widget.file_management._selected_folder, self.root)
+
+        def settings(self):
+            return QtCore.QSettings(str(self.root / 'preferences.ini'),
+                                    QtCore.QSettings.Format.IniFormat)
+
+        def test_last_library_persists_and_restores_without_picker(self):
+            widget = self.open_window(self.root, settings=self.settings())
+            self.assertEqual(self.settings().value('library/lastPath'), str(self.root))
+            widget.close()
+            reopened = MainWidget(settings=self.settings())
+            self.addCleanup(reopened.close)
+            with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory') as picker:
+                with patch.object(QtWidgets.QMessageBox, 'question') as question:
+                    reopened.restore_last_library()
+            picker.assert_not_called()
+            question.assert_not_called()
+            self.assertEqual(reopened.file_management._selected_folder, self.root)
+            self.assertEqual(reopened.import_widget._destination, self.root)
+            self.assertEqual(set(reopened.grid.model.paths), set(self.paths))
+
+        def test_startup_uses_picker_for_missing_folder_or_catalogue(self):
+            empty = self.root / 'no-catalogue'
+            empty.mkdir()
+            settings = self.settings()
+            for saved in ('', str(self.root / 'missing'), str(empty)):
+                settings.setValue('library/lastPath', saved)
+                widget = MainWidget(settings=settings)
+                self.addCleanup(widget.close)
+                with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value='') as picker:
+                    widget.restore_last_library()
+                picker.assert_called_once()
+                self.assertFalse(hasattr(widget.file_management, '_selected_folder'))
+                self.assertEqual(settings.value('library/lastPath'), saved)
+                self.assertFalse((empty / DATABASE_NAME).exists())
+
+        def test_cancel_or_decline_does_not_replace_remembered_library(self):
+            settings = self.settings()
+            widget = self.open_window(self.root, settings=settings)
+            other = self.root / 'not-opened'
+            other.mkdir()
+            for chosen in ('', str(other)):
+                with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=chosen):
+                    with patch.object(QtWidgets.QMessageBox, 'question',
+                                      return_value=QtWidgets.QMessageBox.StandardButton.No):
+                        widget.select_folder()
+                self.assertEqual(self.settings().value('library/lastPath'), str(self.root))
+                self.assertEqual(widget.file_management._selected_folder, self.root)
 
     result = unittest.TextTestRunner(verbosity=2).run(
         unittest.defaultTestLoader.loadTestsFromTestCase(GuiReviewTests))

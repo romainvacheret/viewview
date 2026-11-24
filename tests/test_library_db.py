@@ -25,6 +25,22 @@ class LibraryDatabaseTests(unittest.TestCase):
         (self.root / 'tags.json').write_text(json.dumps(tags))
         (self.root / 'review.json').write_text(json.dumps({'to_be_deleted': [self.photo]}))
 
+    def test_old_database_name_is_copied_without_losing_metadata(self):
+        from viewview.core.library_db import initialize_catalogue, validate_database
+        add_tags(self.root, ['family'], [self.photo])
+        set_rating(self.root, self.root / self.photo, 4)
+        set_deletion_mark(self.root, self.root / self.photo, True)
+        old = self.root / 'viewview.sqlite3'
+        self.database.rename(old)
+        original = old.read_bytes()
+        validate_database(self.root)
+        self.assertFalse(self.database.exists())
+        initialize_catalogue(self.root)
+        self.assertEqual(read_tags(self.root), {'family': [self.photo]})
+        self.assertEqual(read_rating(self.root, self.root / self.photo), 4)
+        self.assertEqual(read_deletion_marks(self.root), {self.photo})
+        self.assertEqual(old.read_bytes(), original)
+
     def test_migration_preserves_tags_marks_and_original_backups(self):
         self.legacy()
         originals = {name: (self.root / name).read_bytes() for name in ('tags.json', 'review.json')}

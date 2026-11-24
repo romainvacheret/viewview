@@ -18,6 +18,10 @@ def check_grid():
     from viewview.grid import load_thumbnail
     from viewview.core.review import read_rating, is_marked_for_deletion
 
+    from unittest.mock import patch
+    patch.object(QtWidgets.QMessageBox, 'question',
+                 return_value=QtWidgets.QMessageBox.StandardButton.Yes).start()
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
 

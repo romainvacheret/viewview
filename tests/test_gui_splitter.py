@@ -13,6 +13,10 @@ def check_splitter():
     from PySide6 import QtCore, QtGui, QtTest, QtWidgets
     from viewview.gui import MainWidget
 
+    from unittest.mock import patch
+    patch.object(QtWidgets.QMessageBox, 'question',
+                 return_value=QtWidgets.QMessageBox.StandardButton.Yes).start()
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
 

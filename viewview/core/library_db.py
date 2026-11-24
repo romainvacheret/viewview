@@ -1,10 +1,12 @@
 """One transactional metadata database per library, with legacy JSON migration."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 import json
 from pathlib import Path, PurePosixPath
 import sqlite3
+import os
+import tempfile
 
-DATABASE_NAME = 'viewview.sqlite3'
+DATABASE_NAME = 'catalogue.sqlite3'
 SCHEMA_VERSION = 2
 
 RATING_COLUMN = "rating INTEGER CHECK (rating IS NULL OR (typeof(rating) = 'integer' AND rating BETWEEN 0 AND 5))"
@@ -90,6 +92,12 @@ def database(library: Path, *, write: bool = False, migrate: bool = True):
     Each operation owns its connection, including when called from GUI workers.
     """
     path = library / DATABASE_NAME
+    old_path = library / 'viewview.sqlite3'
+    if not path.exists() and old_path.exists():
+        if migrate:
+            initialize_catalogue(library)
+        else:
+            path = old_path
     exists = path.exists()
     legacy = _legacy_metadata(library) if not exists else None
     has_legacy = (library / 'tags.json').exists() or (library / 'review.json').exists()
@@ -168,3 +176,30 @@ def validate_database(library: Path) -> None:
     """Check schema/legacy data without creating files or performing migration."""
     with database(library, migrate=False):
         pass
+
+
+def initialize_catalogue(library: Path) -> None:
+    """Create a catalogue, preserving metadata from the previous database name."""
+    try:
+        path = library / DATABASE_NAME
+        old_path = library / 'viewview.sqlite3'
+        if not path.exists() and old_path.exists():
+            # SQLite backup includes committed journal/WAL changes. Publish only a
+            # validated copy, without overwriting a concurrently created catalogue.
+            with closing(sqlite3.connect(old_path.resolve().as_uri() + '?mode=ro', uri=True)) as source:
+                _check_schema(source)
+                descriptor, temporary = tempfile.mkstemp(prefix='.catalogue-', dir=library)
+                os.close(descriptor)
+                try:
+                    with closing(sqlite3.connect(temporary)) as destination:
+                        source.backup(destination)
+                    try:
+                        os.link(temporary, path)
+                    except FileExistsError:
+                        pass
+                finally:
+                    os.unlink(temporary)
+        with database(library, write=True):
+            pass
+    except sqlite3.Error as error:
+        raise ValueError(f'Could not migrate library database: {error}') from error

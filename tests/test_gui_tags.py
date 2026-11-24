@@ -15,6 +15,10 @@ def check_tags_gui():
     from viewview.core.tags import add_tags, photo_tags, tag_names
     from viewview.core.review import review_path
 
+    from unittest.mock import patch
+    patch.object(QtWidgets.QMessageBox, 'question',
+                 return_value=QtWidgets.QMessageBox.StandardButton.Yes).start()
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
 

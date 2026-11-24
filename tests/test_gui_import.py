@@ -19,6 +19,10 @@ def check_import_gui():
     from viewview.import_gui import import_images, parse_tags
     from viewview.core.tags import read_tags
 
+    from unittest.mock import patch
+    patch.object(QtWidgets.QMessageBox, 'question',
+                 return_value=QtWidgets.QMessageBox.StandardButton.Yes).start()
+
     app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
     app.setStyleSheet(Path('viewview/style.qss').read_text())
 
@@ -134,6 +138,8 @@ def check_import_gui():
             self.assertFalse(self.importer.import_button.isEnabled())
 
         def test_invalid_tag_index_disables_import_before_any_move(self):
+            from viewview.core.library_db import DATABASE_NAME
+            (self.destination / DATABASE_NAME).unlink()
             (self.destination / 'tags.json').write_text('broken')
             self.importer.move_button.click()
             self.preview_failure('family')

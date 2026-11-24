@@ -19,6 +19,7 @@ from .grid import GridWidget
 from .tag_editor import TagEditor
 from .core.tags import add_tags, photo_tags, tag_names, remove_photo_tag
 from .core.review import review_path
+from .core.library_db import DATABASE_NAME, initialize_catalogue
 from .core.review import is_marked_for_deletion, set_deletion_mark, read_rating, set_rating
 
 register_heif_opener()
@@ -352,11 +353,29 @@ class FileManagementWidget(QtWidgets.QWidget):
         self._init_layout()
 
     def select_folder(self):
-        self._browser = QtWidgets.QFileDialog(self, 'Select folder')
-        folder = self._browser.getExistingDirectory()
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self, 'Select folder', str(getattr(self, '_selected_folder', '')))
         if not folder:
             return
-        self._selected_folder = pathlib.Path(folder)
+        self.open_folder(pathlib.Path(folder))
+
+    def open_folder(self, selected):
+        if not (selected / DATABASE_NAME).exists():
+            message = f'Create {DATABASE_NAME} in this folder?\n\n{selected}'
+            if (selected / 'viewview.sqlite3').exists():
+                message += '\n\nExisting ratings, tags, and deletion marks will be copied from viewview.sqlite3.'
+            answer = QtWidgets.QMessageBox.question(
+                self, 'Create catalogue?', message,
+                QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No)
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            try:
+                initialize_catalogue(selected)
+            except (OSError, ValueError) as error:
+                QtWidgets.QMessageBox.warning(self, 'Could not create catalogue', str(error))
+                return
+        self._selected_folder = selected
 
         self._input.setText(str(self._selected_folder))
         self._input.setToolTip(f'<qt>{escape(str(self._selected_folder.resolve()))}</qt>')
@@ -367,6 +386,9 @@ class FileManagementWidget(QtWidgets.QWidget):
         self.setAttribute(QtCore.Qt.WidgetAttribute.WA_StyledBackground, True)
 
     def _init_input(self):
+        self.open_folder_button = QtWidgets.QPushButton('Open folder…')
+        self.open_folder_button.setToolTip('Choose a different library folder')
+        self.open_folder_button.clicked.connect(self._parent.select_folder)
         self._input = QtWidgets.QLabel()
         self._input.setObjectName('filemanager-input')
         self._input.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
@@ -461,13 +483,15 @@ class FileManagementWidget(QtWidgets.QWidget):
         list_width = (content_width + 2 * self._list.frameWidth()
                       + self._list.style().pixelMetric(QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent))
         margins = self._layout.contentsMargins()
-        width = (max(self._input.sizeHint().width(), list_width)
+        width = (max(self._input.sizeHint().width(), list_width,
+                     self.open_folder_button.sizeHint().width())
                  + margins.left() + margins.right() + 24)
         self.setMaximumWidth(max(self.minimumSizeHint().width(), width))
 
     def _init_layout(self):
         self._layout = QtWidgets.QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
+        self._layout.addWidget(self.open_folder_button)
         self._layout.addWidget(self._input)
         self._layout.addWidget(self._list)
         self.setLayout(self._layout)
@@ -623,8 +647,9 @@ class ToggleSplitter(QtWidgets.QSplitter):
 
 
 class MainWidget(QtWidgets.QWidget):
-    def __init__(self):
+    def __init__(self, settings=None):
         super().__init__()
+        self._settings = settings
         self._allow_close()
         self._FILE_MANAGEMENT_SIZE = 300
         self._initial_sizes_set = False
@@ -733,7 +758,20 @@ class MainWidget(QtWidgets.QWidget):
             super().closeEvent(event)
 
     def select_folder(self):
+        if self.import_widget.is_busy:
+            self.import_widget.result_label.setText(
+                'Please wait for the current import check or operation to finish before changing folders.')
+            return
         self.file_management.select_folder()
+
+    def restore_last_library(self):
+        saved = self._settings.value('library/lastPath', '') if self._settings is not None else ''
+        if isinstance(saved, str) and saved:
+            folder = pathlib.Path(saved)
+            if folder.is_absolute() and folder.is_dir() and (folder / DATABASE_NAME).is_file():
+                self.file_management.open_folder(folder)
+                return
+        self.select_folder()
 
     def set_current_image(self, image: pathlib.Path):
         self.image_path = image
@@ -813,6 +851,9 @@ class MainWidget(QtWidgets.QWidget):
     def _library_changed(self, _folder):
         self._clear_current_image()
         self.select_grid_folder(_folder)
+        if self._settings is not None:
+            self._settings.setValue('library/lastPath', str(_folder.absolute()))
+            self._settings.sync()
 
     def _update_mark_shortcut(self, *_):
         focus = QtWidgets.QApplication.focusWidget()
@@ -950,8 +991,8 @@ def main() -> int:
 
     with pathlib.Path(__file__).with_name("style.qss").open(encoding="utf-8") as f:
         app.setStyleSheet(f.read())
-    main_widget = MainWidget()
+    main_widget = MainWidget(settings=QtCore.QSettings('Viewview', 'Viewview'))
     main_widget.showMaximized()
-    main_widget.select_folder()
+    main_widget.restore_last_library()
 
     return app.exec()
