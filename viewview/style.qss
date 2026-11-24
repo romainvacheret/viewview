@@ -302,7 +302,7 @@ ImportWidget QTreeWidget::item {
     padding: 6px 4px;
 }
 
-ImportWidget QPushButton, FileManagementWidget QPushButton, QMessageBox QPushButton, FilterBar QPushButton {
+ImportWidget QPushButton, FileManagementWidget QPushButton, QMessageBox QPushButton, FilterBar QPushButton, GridWidget QPushButton {
     color: #cbd8e5;
     background-color: #263241;
     border: 1px solid #425063;
@@ -310,7 +310,7 @@ ImportWidget QPushButton, FileManagementWidget QPushButton, QMessageBox QPushBut
     padding: 8px 16px;
 }
 
-ImportWidget QPushButton:hover, FileManagementWidget QPushButton:hover, QMessageBox QPushButton:hover, FilterBar QPushButton:hover {
+ImportWidget QPushButton:hover, FileManagementWidget QPushButton:hover, QMessageBox QPushButton:hover, FilterBar QPushButton:hover, GridWidget QPushButton:hover {
     background-color: #34485a;
     border-color: #68b6a7;
 }
@@ -321,7 +321,7 @@ ImportWidget QPushButton:checked, #import-action {
     border-color: #43887f;
 }
 
-ImportWidget QPushButton:disabled, FileManagementWidget QPushButton:disabled {
+ImportWidget QPushButton:disabled, FileManagementWidget QPushButton:disabled, GridWidget QPushButton:disabled {
     color: #778697;
     background-color: #191f28;
     border-color: #2b3441;

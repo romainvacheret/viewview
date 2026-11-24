@@ -65,22 +65,193 @@ def check_grid():
             self.widget.view_tabs.setCurrentIndex(1)
             app.processEvents()
 
-        def click(self, path, double=False):
+        def click(self, path, double=False, modifiers=QtCore.Qt.KeyboardModifier.NoModifier):
             index = self.grid.model.index(self.grid.model.rows[path])
             self.grid.view.scrollTo(index)
             app.processEvents()
             point = self.grid.view.visualRect(index).center()
-            QtTest.QTest.mouseClick(self.grid.view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=point)
+            QtTest.QTest.mouseClick(self.grid.view.viewport(), QtCore.Qt.MouseButton.LeftButton,
+                                   modifiers, pos=point)
             if double:
                 QtTest.QTest.mouseDClick(self.grid.view.viewport(), QtCore.Qt.MouseButton.LeftButton, pos=point)
             app.processEvents()
 
         def press_x(self):
+            self.press_key(QtCore.Qt.Key.Key_X)
+
+        def press_key(self, key, modifiers=QtCore.Qt.KeyboardModifier.NoModifier):
             self.widget.activateWindow()
             self.grid.view.setFocus()
             app.processEvents()
-            QtTest.QTest.keyClick(self.grid.view, QtCore.Qt.Key.Key_X)
+            QtTest.QTest.keyClick(self.grid.view, key, modifiers)
             app.processEvents()
+
+        def select_all(self):
+            self.press_key(QtCore.Qt.Key.Key_A, QtCore.Qt.KeyboardModifier.ControlModifier)
+
+        def test_ctrl_click_selects_independently_and_toggles_selection(self):
+            self.show_grid()
+            self.click(self.portrait)
+            self.click(self.heic, modifiers=QtCore.Qt.KeyboardModifier.ControlModifier)
+            self.assertEqual(self.grid.selected_images(), [self.portrait, self.heic])
+            self.assertEqual(self.widget.image_path, self.heic)
+            self.click(self.portrait, modifiers=QtCore.Qt.KeyboardModifier.ControlModifier)
+            self.assertEqual(self.grid.selected_images(), [self.heic])
+            self.click(self.last)
+            self.assertEqual(self.grid.selected_images(), [self.last])
+
+        def test_shift_click_selects_contiguous_picture_range(self):
+            self.show_grid()
+            self.click(self.portrait)
+            self.click(self.heic, modifiers=QtCore.Qt.KeyboardModifier.ShiftModifier)
+            self.assertEqual(self.grid.selected_images(), [self.portrait, self.landscape, self.heic])
+
+        def test_multi_selection_survives_metadata_edits_and_refresh(self):
+            self.show_grid()
+            self.click(self.portrait)
+            self.click(self.heic, modifiers=QtCore.Qt.KeyboardModifier.ControlModifier)
+            self.widget.set_rating(4)
+            self.assertEqual(self.grid.selected_images(), [self.portrait, self.heic])
+            self.widget._refresh_library()
+            self.assertEqual(self.grid.selected_images(), [self.portrait, self.heic])
+
+        def test_ctrl_a_selects_only_current_filtered_folder(self):
+            from viewview.core.tags import add_tags
+            add_tags(self.root, ['family'], ['alpha/01-landscape.jpg', 'last.jpg'])
+            self.widget._refresh_library()
+            self.show_grid(self.alpha)
+            self.widget.filters.tag.setCurrentIndex(self.widget.filters.tag.findData('family'))
+            self.select_all()
+            self.assertEqual(self.grid.selected_images(), [self.landscape])
+            self.widget.filters.reset()
+            self.select_all()
+            self.assertEqual(self.grid.selected_images(), [self.portrait, self.landscape])
+            self.assertTrue(self.grid.delete_button.isEnabled())
+
+        def trash_mock(self, path):
+            if not hasattr(self, '_trash_directory'):
+                self._trash_directory = tempfile.TemporaryDirectory()
+                self.addCleanup(self._trash_directory.cleanup)
+            trash = Path(self._trash_directory.name)
+            Path(path).rename(trash / Path(path).name)
+            return True
+
+        def test_delete_button_moves_only_selected_photos_to_trash(self):
+            self.show_grid()
+            self.click(self.portrait)
+            self.click(self.heic, modifiers=QtCore.Qt.KeyboardModifier.ControlModifier)
+            with patch('viewview.gui.QtCore.QFile.moveToTrash', side_effect=self.trash_mock) as trash:
+                self.grid.delete_button.click()
+            self.assertEqual([call.args[0] for call in trash.call_args_list],
+                             [str(self.portrait), str(self.heic)])
+            self.assertFalse(self.portrait.exists())
+            self.assertFalse(self.heic.exists())
+            self.assertTrue(self.landscape.exists())
+            self.assertTrue(self.last.exists())
+            self.assertNotIn(self.portrait, self.grid.model.paths)
+            self.assertIn('Moved 2', self.grid.result_label.text())
+
+        def test_declining_confirmation_preserves_files_catalogue_and_selection(self):
+            from viewview.core.library_db import DATABASE_NAME
+            self.show_grid()
+            self.click(self.portrait)
+            for multiple in (False, True):
+                if multiple:
+                    self.click(self.heic, modifiers=QtCore.Qt.KeyboardModifier.ControlModifier)
+                selected = self.grid.selected_images()
+                original = (self.root / DATABASE_NAME).read_bytes()
+                with patch.object(QtWidgets.QMessageBox, 'question',
+                                  return_value=QtWidgets.QMessageBox.StandardButton.No) as question:
+                    with patch('viewview.gui.QtCore.QFile.moveToTrash') as trash:
+                        self.grid.delete_button.click()
+                trash.assert_not_called()
+                text = question.call_args.args[2]
+                self.assertIn(f'Delete {len(selected)} selected picture', text)
+                self.assertEqual(question.call_args.args[4], QtWidgets.QMessageBox.StandardButton.No)
+                self.assertEqual(self.grid.selected_images(), selected)
+                self.assertEqual((self.root / DATABASE_NAME).read_bytes(), original)
+                self.assertTrue(all(path.exists() for path in selected))
+
+        def test_unwritable_catalogue_prevents_trashing_files(self):
+            self.show_grid()
+            self.click(self.portrait)
+            with patch('viewview.gui.database', side_effect=ValueError('Read-only catalogue')):
+                with patch('viewview.gui.QtCore.QFile.moveToTrash') as trash:
+                    self.grid.delete_button.click()
+            trash.assert_not_called()
+            self.assertTrue(self.portrait.exists())
+            self.assertIn('Read-only catalogue', self.grid.result_label.text())
+
+        def test_both_delete_keys_remove_single_selection(self):
+            self.show_grid()
+            with patch('viewview.gui.QtCore.QFile.moveToTrash', side_effect=self.trash_mock):
+                self.click(self.portrait)
+                self.press_key(QtCore.Qt.Key.Key_Delete)
+                self.assertFalse(self.portrait.exists())
+                self.click(self.landscape)
+                self.press_key(QtCore.Qt.Key.Key_Backspace)
+                self.assertFalse(self.landscape.exists())
+
+        def test_trash_failure_keeps_failed_photo_and_reports_partial_result(self):
+            from viewview.core.tags import add_tags, photo_tags, tag_names
+            from viewview.core.review import set_rating, set_deletion_mark
+            for path in (self.portrait, self.landscape):
+                relative = path.relative_to(self.root).as_posix()
+                add_tags(self.root, ['family'], [relative])
+                set_rating(self.root, path, 4)
+                set_deletion_mark(self.root, path, True)
+            self.show_grid(self.alpha)
+            self.select_all()
+            def trash(path):
+                return False if Path(path) == self.landscape else self.trash_mock(path)
+            with patch('viewview.gui.QtCore.QFile.moveToTrash', side_effect=trash):
+                self.grid.delete_button.click()
+            self.assertTrue(self.landscape.exists())
+            self.assertFalse(self.portrait.exists())
+            self.assertIn(self.landscape, self.grid.model.paths)
+            self.assertIn(str(self.landscape), self.grid.result_label.text())
+            self.assertIn('Moved 1', self.grid.result_label.text())
+            self.assertEqual(photo_tags(self.root, 'alpha/nested/03-portrait.PNG'), [])
+            self.assertIsNone(read_rating(self.root, self.portrait))
+            self.assertFalse(is_marked_for_deletion(self.root, self.portrait))
+            self.assertEqual(photo_tags(self.root, 'alpha/01-landscape.jpg'), ['family'])
+            self.assertEqual(read_rating(self.root, self.landscape), 4)
+            self.assertTrue(is_marked_for_deletion(self.root, self.landscape))
+            self.assertIn('family', tag_names(self.root))
+
+        def test_marked_filter_uses_same_selection_and_delete_action(self):
+            from viewview.core.review import set_deletion_mark
+            from viewview.core.tags import add_tags, photo_tags
+            set_deletion_mark(self.root, self.portrait, True)
+            add_tags(self.root, ['family'], ['alpha/nested/03-portrait.PNG'])
+            self.widget._refresh_library()
+            self.show_grid()
+            self.widget.filters.deletion.setCurrentIndex(1)
+            self.select_all()
+            with patch('viewview.gui.QtCore.QFile.moveToTrash', side_effect=self.trash_mock):
+                self.grid.delete_button.click()
+            self.assertEqual(self.grid.model.paths, ())
+            self.assertFalse(self.grid.delete_button.isEnabled())
+            self.assertIsNone(self.widget.image_path)
+            self.assertTrue(self.last.exists())
+            self.assertEqual(photo_tags(self.root, 'alpha/nested/03-portrait.PNG'), [])
+            self.assertFalse(is_marked_for_deletion(self.root, self.portrait))
+
+        def test_delete_shortcuts_ignore_text_entry_and_other_tabs(self):
+            self.show_grid()
+            self.click(self.landscape)
+            entry = self.widget.metadata.tags_editor.input
+            entry.setFocus()
+            entry.setText('tag')
+            app.processEvents()
+            with patch('viewview.gui.QtCore.QFile.moveToTrash') as trash:
+                QtTest.QTest.keyClick(entry, QtCore.Qt.Key.Key_Backspace)
+                self.assertEqual(entry.text(), 'ta')
+                self.widget.view_tabs.setCurrentIndex(0)
+                self.press_key(QtCore.Qt.Key.Key_Delete)
+                self.widget.tabs.setCurrentIndex(1)
+                self.press_key(QtCore.Qt.Key.Key_Backspace)
+            trash.assert_not_called()
 
         def test_nested_tabs_share_panels_and_tree_order_including_collapsed_folders(self):
             self.assertEqual(self.widget.tabs.count(), 2)

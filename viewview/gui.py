@@ -747,6 +747,15 @@ class MainWidget(QtWidgets.QWidget):
             shortcut.activated.connect(lambda rating=rating: self.rate_and_advance(rating))
             shortcut.setEnabled(False)
             self._rating_shortcuts.append(shortcut)
+        self._delete_shortcuts = []
+        for key in ('Delete', 'Backspace'):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(key), self)
+            shortcut.setAutoRepeat(False)
+            shortcut.activated.connect(self.delete_selected_images)
+            shortcut.setEnabled(False)
+            self._delete_shortcuts.append(shortcut)
+        self.grid.delete_button.clicked.connect(self.delete_selected_images)
+        self.grid.selection_changed.connect(self._update_mark_shortcut)
         self.tabs.currentChanged.connect(self._update_mark_shortcut)
         QtWidgets.QApplication.instance().focusChanged.connect(self._update_mark_shortcut)
 
@@ -841,6 +850,7 @@ class MainWidget(QtWidgets.QWidget):
     def _view_changed(self, index):
         if index == 0 and self._displayed_image != self.image_path:
             self._display_current_image()
+        self._update_mark_shortcut()
 
     def _open_grid_image(self, image):
         if self.image_path != image:
@@ -1003,6 +1013,64 @@ class MainWidget(QtWidgets.QWidget):
             shortcut.setEnabled(viewing)
         for shortcut in self._rating_shortcuts:
             shortcut.setEnabled(viewing and self.metadata._ratingw.isEnabled())
+        deleting = (self.tabs.currentIndex() == 0 and self.view_tabs.currentIndex() == 1
+                    and not editing and bool(self.grid.selected_images()))
+        for shortcut in self._delete_shortcuts:
+            shortcut.setEnabled(deleting)
+
+    def delete_selected_images(self):
+        if self.tabs.currentIndex() != 0 or self.view_tabs.currentIndex() != 1:
+            return
+        if self.import_widget.is_busy:
+            self.grid.result_label.setText('Wait for the import check or operation to finish before deleting pictures.')
+            self.grid.result_label.show()
+            return
+        paths = self.grid.selected_images()
+        if not paths:
+            return
+        count = len(paths)
+        answer = QtWidgets.QMessageBox.question(
+            self, 'Confirm deletion',
+            f'Delete {count} selected ' + ('picture?' if count == 1 else 'pictures?')
+            + '\n\nThey will be moved to trash and their catalogue information will be removed.',
+            QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No)
+        if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+            return
+        removed = []
+        failures = []
+        catalogue_error = ''
+        library = self.file_management._selected_folder
+        try:
+            # Acquire a writable catalogue transaction before moving any files.
+            # Failed trash operations retain their complete metadata.
+            with database(library, write=True) as connection:
+                for path in paths:
+                    try:
+                        success = QtCore.QFile.moveToTrash(str(path))
+                    except OSError as error:
+                        failures.append(f'{path}: {error}')
+                        continue
+                    if not success:
+                        failures.append(str(path))
+                        continue
+                    removed.append(path)
+                    self._file_ratings.pop(path, None)
+                    relative = review_path(library, path)
+                    connection.execute('DELETE FROM photo_tags WHERE photo_path = ?', (relative,))
+                    connection.execute('DELETE FROM photos WHERE path = ?', (relative,))
+        except (OSError, ValueError) as error:
+            catalogue_error = f'Could not update the catalogue: {error}'
+            if removed:
+                catalogue_error += '\nPictures already moved to trash may still have catalogue information.'
+        self._refresh_library()
+        message = f'Moved {len(removed)} picture(s) to trash.'
+        if failures:
+            message += '\nCould not move these pictures to trash:\n' + '\n'.join(failures)
+        if catalogue_error:
+            message += '\n' + catalogue_error
+        self.grid.result_label.setText(message)
+        self.grid.result_label.show()
 
     def _load_review_state(self):
         library = getattr(self.file_management, '_selected_folder', None)

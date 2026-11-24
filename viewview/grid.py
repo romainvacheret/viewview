@@ -89,6 +89,7 @@ class ThumbnailView(QtWidgets.QListView):
 class GridWidget(QtWidgets.QWidget):
     image_selected = QtCore.Signal(object)
     image_activated = QtCore.Signal(object)
+    selection_changed = QtCore.Signal()
 
     def __init__(self):
         super().__init__()
@@ -111,8 +112,12 @@ class GridWidget(QtWidgets.QWidget):
                                         QtWidgets.QSizePolicy.Policy.Preferred)
         self.folder_label.setMinimumWidth(0)
         self.count_label = QtWidgets.QLabel('0 pictures')
+        self.delete_button = QtWidgets.QPushButton('Delete')
+        self.delete_button.setToolTip('Move selected pictures to trash (Delete or Backspace)')
+        self.delete_button.setEnabled(False)
         heading.addWidget(self.folder_label, 1)
         heading.addWidget(self.count_label)
+        heading.addWidget(self.delete_button)
         layout.addLayout(heading)
         self.view = ThumbnailView()
         self.view.setViewMode(QtWidgets.QListView.ViewMode.IconMode)
@@ -124,7 +129,7 @@ class GridWidget(QtWidgets.QWidget):
         self.view.setTextElideMode(QtCore.Qt.TextElideMode.ElideRight)
         self.view.setIconSize(QtCore.QSize(176, 132))
         self.view.setGridSize(QtCore.QSize(200, 170))
-        self.view.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.SingleSelection)
+        self.view.setSelectionMode(QtWidgets.QAbstractItemView.SelectionMode.ExtendedSelection)
         self.view.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.view.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.model = ThumbnailModel(
@@ -132,6 +137,10 @@ class GridWidget(QtWidgets.QWidget):
             self.style().standardIcon(QtWidgets.QStyle.StandardPixmap.SP_MessageBoxWarning), self)
         self.view.setModel(self.model)
         self.view.selectionModel().currentChanged.connect(self._selection_changed)
+        self.view.selectionModel().selectionChanged.connect(self._update_selection_count)
+        self._select_all = QtGui.QShortcut(QtGui.QKeySequence('Ctrl+A'), self.view)
+        self._select_all.setContext(QtCore.Qt.ShortcutContext.WidgetWithChildrenShortcut)
+        self._select_all.activated.connect(self.view.selectAll)
         self.view.doubleClicked.connect(lambda index: self.image_activated.emit(self.model.paths[index.row()]))
         self.view.verticalScrollBar().valueChanged.connect(self._wake)
         self.view.viewport_changed.connect(self._wake)
@@ -142,11 +151,17 @@ class GridWidget(QtWidgets.QWidget):
         self._stack.addWidget(self.empty_label)
         self._stack.addWidget(self.view)
         layout.addLayout(self._stack, 1)
+        self.result_label = QtWidgets.QLabel()
+        self.result_label.setTextFormat(QtCore.Qt.TextFormat.PlainText)
+        self.result_label.setWordWrap(True)
+        self.result_label.hide()
+        layout.addWidget(self.result_label)
 
     def set_folder(self, folder, paths, *, refresh=False):
         paths = tuple(paths)
         if not refresh and folder == self.folder and paths == self.model.paths:
             return
+        selected = set(self.selected_images()) if folder == self.folder else set()
         self.folder = folder
         self.generation += 1
         for future in self._jobs:
@@ -154,24 +169,36 @@ class GridWidget(QtWidgets.QWidget):
         self._syncing_selection = True
         try:
             self.model.set_paths(paths)
+            selection = QtCore.QItemSelection()
+            for row, path in enumerate(paths):
+                if path in selected:
+                    index = self.model.index(row)
+                    selection.select(index, index)
+            self.view.selectionModel().select(selection, QtCore.QItemSelectionModel.SelectionFlag.Select)
         finally:
             self._syncing_selection = False
         self.folder_label.setText(str(folder))
         self.folder_label.setToolTip(f'<qt>{escape(str(folder))}</qt>')
-        self.count_label.setText(f'{len(paths)} pictures')
+        self._update_selection_count()
+        self.result_label.hide()
         self.empty_label.setText('No pictures in this folder or its subfolders.')
         self._stack.setCurrentIndex(1 if paths else 0)
         self.view.scrollToTop()
         self._wake()
 
     def select_image(self, image):
+        if self._syncing_selection:
+            return
         row = self.model.rows.get(image)
         if row is None:
             return
         self._syncing_selection = True
         try:
             index = self.model.index(row)
-            self.view.setCurrentIndex(index)
+            if self.view.selectionModel().isSelected(index):
+                self.view.selectionModel().setCurrentIndex(index, QtCore.QItemSelectionModel.SelectionFlag.NoUpdate)
+            else:
+                self.view.setCurrentIndex(index)
             self.view.scrollTo(index)
         finally:
             self._syncing_selection = False
@@ -185,7 +212,21 @@ class GridWidget(QtWidgets.QWidget):
 
     def _selection_changed(self, current, previous):
         if current.isValid() and not self._syncing_selection:
-            self.image_selected.emit(self.model.paths[current.row()])
+            self._syncing_selection = True
+            try:
+                self.image_selected.emit(self.model.paths[current.row()])
+            finally:
+                self._syncing_selection = False
+
+    def selected_images(self):
+        return [self.model.paths[index.row()] for index in
+                sorted(self.view.selectionModel().selectedRows(), key=lambda index: index.row())]
+
+    def _update_selection_count(self, *_):
+        count = len(self.selected_images())
+        self.count_label.setText(f'{len(self.model.paths)} pictures · {count} selected')
+        self.delete_button.setEnabled(count > 0)
+        self.selection_changed.emit()
 
     def visible_rows(self):
         # Rows have monotonically increasing y coordinates in the wrapping grid.

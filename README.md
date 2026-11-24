@@ -27,6 +27,28 @@ to select it and edit its rating or deletion mark; double-click to open it in
 Single picture. In Grid, **X** toggles the deletion mark and advances within that
 grid's pictures. Previews load in the background with a bounded memory cache.
 
+In Grid, **Ctrl-click** toggles individual pictures, **Shift-click** selects the
+range from the selection anchor to the clicked picture, and **Ctrl+A** selects
+all pictures in the current grid, including those below the scroll position.
+Only pictures in the selected folder and matching the active filters are
+included. A plain click selects one picture; the count shows how many are selected.
+The right panel edits the current picture; selecting multiple pictures does not
+apply tags, ratings, or review marks to the whole selection.
+
+Use the grid's **Delete** button, **Delete**, or **Backspace** to move selected
+pictures to the operating system's trash after confirming the selected count
+in a dialog. Declining keeps the files, catalogue, and selection unchanged.
+If trashing fails, that picture stays
+in place and the result lists the failure. There is no permanent-delete fallback.
+The tree and grid refresh afterward. Successfully trashed pictures are removed
+from the catalogue, including their tag associations, rating, and review mark.
+Other pictures and the library's tag vocabulary are preserved. A writable
+catalogue is required before moving files; catalogue failures are reported.
+To remove marked pictures, filter by **Marked for deletion**, select the desired
+pictures (or Ctrl+A), and use the same Delete action. Deletion shortcuts are
+inactive while editing text or outside Grid; deletion waits for active import
+checks or operations to finish.
+
 In Single picture, the image automatically fits the available space when resizing
 the window or dragging, collapsing, or restoring either side panel. Its aspect
 ratio is preserved, and resizing uses the decoded original without reloading it.
