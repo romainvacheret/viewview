@@ -302,7 +302,7 @@ ImportWidget QTreeWidget::item {
     padding: 6px 4px;
 }
 
-ImportWidget QPushButton, FileManagementWidget QPushButton, QMessageBox QPushButton {
+ImportWidget QPushButton, FileManagementWidget QPushButton, QMessageBox QPushButton, FilterBar QPushButton {
     color: #cbd8e5;
     background-color: #263241;
     border: 1px solid #425063;
@@ -310,7 +310,7 @@ ImportWidget QPushButton, FileManagementWidget QPushButton, QMessageBox QPushBut
     padding: 8px 16px;
 }
 
-ImportWidget QPushButton:hover, FileManagementWidget QPushButton:hover, QMessageBox QPushButton:hover {
+ImportWidget QPushButton:hover, FileManagementWidget QPushButton:hover, QMessageBox QPushButton:hover, FilterBar QPushButton:hover {
     background-color: #34485a;
     border-color: #68b6a7;
 }
@@ -334,6 +334,36 @@ QMessageBox, QMessageBox QLabel {
 
 FileManagementWidget QPushButton:focus, QMessageBox QPushButton:focus {
     border-color: #68b6a7;
+}
+
+FilterBar {
+    background-color: #11151b;
+}
+
+FilterBar QLabel {
+    color: #aebdcd;
+    background: transparent;
+}
+
+FilterBar QComboBox {
+    color: #e3e9f0;
+    background-color: #202936;
+    border: 1px solid #425063;
+    border-radius: 6px;
+    padding: 7px 24px 7px 8px;
+}
+
+FilterBar QComboBox:focus, FilterBar QComboBox:hover {
+    border-color: #68b6a7;
+}
+
+FilterBar QComboBox QAbstractItemView {
+    color: #e3e9f0;
+    background-color: #202936;
+    selection-background-color: #244b50;
+    selection-color: #effffc;
+    border: 1px solid #425063;
+    outline: 0;
 }
 
 MetadataWidget QCheckBox {

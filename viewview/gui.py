@@ -17,9 +17,10 @@ from PySide6 import QtCore, QtWidgets, QtGui
 from .import_gui import ImportWidget
 from .grid import GridWidget
 from .tag_editor import TagEditor
+from .filters import FilterBar
 from .core.tags import add_tags, photo_tags, tag_names, remove_photo_tag
 from .core.review import review_path
-from .core.library_db import DATABASE_NAME, initialize_catalogue
+from .core.library_db import DATABASE_NAME, initialize_catalogue, database
 from .core.review import is_marked_for_deletion, set_deletion_mark, read_rating, set_rating
 
 register_heif_opener()
@@ -658,6 +659,7 @@ class MainWidget(QtWidgets.QWidget):
         self._displayed_image = None
         self._grid_folder = None
         self._marked_for_deletion = False
+        self._file_ratings = {}
 
         self.image_display = ImageDisplayWidget()
         self.file_management = FileManagementWidget(self)
@@ -674,12 +676,23 @@ class MainWidget(QtWidgets.QWidget):
         self.view_tabs.currentChanged.connect(self._view_changed)
         self.grid.image_selected.connect(self.set_current_image)
         self.grid.image_activated.connect(self._open_grid_image)
-        self.file_management.contents_changed.connect(self._refresh_grid_paths)
+        self.file_management.contents_changed.connect(self._apply_filters)
+
+        self.filters = FilterBar()
+        self.filters.changed.connect(self._apply_filters)
+        viewer = QtWidgets.QWidget()
+        viewer.setMinimumWidth(1)
+        viewer.setSizePolicy(QtWidgets.QSizePolicy.Policy.Ignored,
+                             QtWidgets.QSizePolicy.Policy.Preferred)
+        viewer_layout = QtWidgets.QVBoxLayout(viewer)
+        viewer_layout.setContentsMargins(0, 0, 0, 0)
+        viewer_layout.addWidget(self.filters)
+        viewer_layout.addWidget(self.view_tabs, 1)
 
         self._splitter = ToggleSplitter(QtCore.Qt.Orientation.Horizontal)
         self._splitter.setHandleWidth(12)
         self._splitter.addWidget(self.file_management)
-        self._splitter.addWidget(self.view_tabs)
+        self._splitter.addWidget(viewer)
         self._splitter.addWidget(self.metadata)
         self._splitter.setStretchFactor(0, 0)
         self._splitter.setStretchFactor(1, 1)
@@ -746,6 +759,7 @@ class MainWidget(QtWidgets.QWidget):
     def _refresh_library(self):
         if hasattr(self.file_management, '_selected_folder'):
             self.file_management._update_list()
+            self._refresh_grid_paths(refresh=True)
             if self.image_path is not None:
                 self._load_review_state()
 
@@ -832,21 +846,119 @@ class MainWidget(QtWidgets.QWidget):
         self._grid_folder = folder
         paths = [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
                  for item in self.file_management._image_items
-                 if item.data(0, QtCore.Qt.ItemDataRole.UserRole).is_relative_to(folder)]
+                 if item.data(0, QtCore.Qt.ItemDataRole.UserRole).is_relative_to(folder)
+                 and not item.isHidden()]
         self.grid.set_folder(folder, paths, refresh=refresh)
         if self.image_path is not None and self.image_path not in self.grid.model.rows:
             self._clear_current_image()
         elif self.image_path is not None:
             self.grid.select_image(self.image_path)
+        total = sum(item.data(0, QtCore.Qt.ItemDataRole.UserRole).is_relative_to(folder)
+                    for item in self.file_management._image_items)
+        self.filters.status.setText(f'{len(paths)} of {total} pictures in selected folder')
+        if self.filters.is_active() and not paths:
+            self.grid.empty_label.setText('No pictures match these filters.')
 
-    def _refresh_grid_paths(self):
+    def _navigation_paths(self):
+        if self.view_tabs.currentIndex() == 1:
+            return list(self.grid.model.paths)
+        return [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                for item in self.file_management._image_items if not item.isHidden()]
+
+    def _embedded_rating(self, path):
+        try:
+            stat = path.stat()
+            key = (stat.st_mtime_ns, stat.st_size)
+            cached = self._file_ratings.get(path)
+            if cached is None or cached[0] != key:
+                with Image.open(path) as image:
+                    value = image.getexif().get(Base.Rating, 0)
+                    value = value if type(value) is int and 0 <= value <= 5 else 0
+                self._file_ratings[path] = (key, value)
+            return self._file_ratings[path][1]
+        except (OSError, ValueError):
+            return 0
+
+    def _apply_filters(self):
+        root = getattr(self.file_management, '_selected_folder', None)
+        if root is None:
+            return
+        if getattr(self, '_filter_root', None) != root:
+            self._filter_root = root
+            self._file_ratings.clear()
+            with QtCore.QSignalBlocker(self.filters):
+                self.filters.reset()
+        current = self.image_path
+        before = self._navigation_paths()
+        paths = [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                 for item in self.file_management._image_items]
+        error = ''
+        try:
+            with database(root) as connection:
+                names = [row[0] for row in connection.execute(
+                    'SELECT name FROM tags ORDER BY name COLLATE NOCASE, name')]
+                self.filters.set_tags(names)
+                tag = self.filters.tag.currentData()
+                rating = self.filters.rating.currentData()
+                deletion = self.filters.deletion.currentData()
+                tagged = {row[0] for row in connection.execute(
+                    'SELECT photo_path FROM photo_tags WHERE tag_name = ?', (tag,))} if tag else set()
+                reviews = {row[0]: (row[1], row[2]) for row in connection.execute(
+                    'SELECT path, rating, to_be_deleted FROM photos')} if self.filters.is_active() else {}
+            matches = set()
+            for path in paths:
+                relative = review_path(root, path)
+                saved, marked = reviews.get(relative, (None, False))
+                if tag is not None and relative not in tagged:
+                    continue
+                if deletion is not None and bool(marked) != deletion:
+                    continue
+                if rating is not None:
+                    mode, wanted = rating
+                    value = saved if saved is not None else self._embedded_rating(path)
+                    if (mode == 'exact' and value != wanted) or (mode == 'minimum' and value < wanted):
+                        continue
+                matches.add(path)
+        except (OSError, ValueError) as failure:
+            error = f'Could not load filters: {failure}'
+            matches = set() if self.filters.is_active() else set(paths)
+        visible_folders = set()
+        for item in self.file_management._image_items:
+            item.setHidden(item.data(0, QtCore.Qt.ItemDataRole.UserRole) not in matches)
+            if not item.isHidden():
+                parent = item.parent()
+                while parent is not None:
+                    visible_folders.add(parent.data(0, QtCore.Qt.ItemDataRole.UserRole))
+                    parent = parent.parent()
+        for path, item in self.file_management._folder_items.items():
+            item.setHidden(self.filters.is_active() and path != root and path not in visible_folders)
+        self._refresh_grid_paths()
+        after = self._navigation_paths()
+        if current is not None and current not in after:
+            following = before[before.index(current) + 1:] if current in before else []
+            replacement = next((path for path in following if path in after), after[0] if after else None)
+            if replacement is None:
+                self._clear_current_image()
+                self.file_management._list.clearSelection()
+            else:
+                self.set_current_image(replacement)
+        elif current is None and self.filters.is_active() and after:
+            self.set_current_image(after[0])
+        elif self.image_path is None:
+            self.image_display.clear()
+        if error:
+            self.filters.status.setText(error)
+        elif not after and self.filters.is_active():
+            self.image_display.setText('No pictures match these filters.')
+
+    def _refresh_grid_paths(self, *, refresh=False):
         root = getattr(self.file_management, '_selected_folder', None)
         if root is None:
             return
         folder = self._grid_folder
         if folder not in self.file_management._folder_items:
             folder = root
-        self.select_grid_folder(folder, refresh=True)
+        self.select_grid_folder(folder, refresh=refresh)
 
     def _library_changed(self, _folder):
         self._clear_current_image()
@@ -857,8 +969,11 @@ class MainWidget(QtWidgets.QWidget):
 
     def _update_mark_shortcut(self, *_):
         focus = QtWidgets.QApplication.focusWidget()
-        editing = (isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QTextEdit, QtWidgets.QPlainTextEdit))
-                   or self.metadata.tags_editor.input.completer().popup().isVisible())
+        editing = (isinstance(focus, (QtWidgets.QLineEdit, QtWidgets.QTextEdit,
+                                      QtWidgets.QPlainTextEdit, QtWidgets.QComboBox))
+                   or self.metadata.tags_editor.input.completer().popup().isVisible()
+                   or any(control.view().isVisible() for control in
+                          (self.filters.tag, self.filters.rating, self.filters.deletion)))
         self._mark_shortcut.setEnabled(self.tabs.currentIndex() == 0
                                       and not editing
                                       and self.metadata.deletion_checkbox.isEnabled())
@@ -900,6 +1015,7 @@ class MainWidget(QtWidgets.QWidget):
             return False
         self._marked_for_deletion = marked
         self.metadata.set_review_state(marked, True)
+        self._apply_filters()
         return True
 
     def _load_tags(self, enabled=True):
@@ -943,6 +1059,7 @@ class MainWidget(QtWidgets.QWidget):
             return
         self._load_tags()
         self.metadata.set_review_state(self._marked_for_deletion, True)
+        self._apply_filters()
 
     def add_photo_tag(self, name):
         self._change_photo_tag(name)
@@ -951,23 +1068,25 @@ class MainWidget(QtWidgets.QWidget):
         self._change_photo_tag(name, remove=True)
 
     def mark_and_advance(self):
+        current = self.image_path
         if self.tabs.currentIndex() == 0 and self.set_deletion_mark(not self._marked_for_deletion):
-            self.navigate_image(1)
+            if current == self.image_path:
+                self.navigate_image(1)
 
     def navigate_image(self, offset):
         if self.tabs.currentIndex() != 0 or self.image_path is None:
             return
-        paths = (self.grid.model.paths if self.view_tabs.currentIndex() == 1 else
-                 [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
-                  for item in self.file_management._image_items])
+        paths = self._navigation_paths()
         if self.image_path in paths:
             index = paths.index(self.image_path) + offset
             if 0 <= index < len(paths):
                 self.set_current_image(paths[index])
 
     def rate_and_advance(self, rating):
+        current = self.image_path
         if self.tabs.currentIndex() == 0 and self.set_rating(rating):
-            self.navigate_image(1)
+            if current == self.image_path:
+                self.navigate_image(1)
 
     def set_rating(self, rating: int):
         library = getattr(self.file_management, '_selected_folder', None)
@@ -983,6 +1102,7 @@ class MainWidget(QtWidgets.QWidget):
         self._saved_rating = rating
         self.metadata.set_rating_state(rating, True)
         self.metadata.set_review_state(self._marked_for_deletion, True)
+        self._apply_filters()
         return True
 
 

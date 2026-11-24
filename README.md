@@ -27,6 +27,18 @@ to select it and edit its rating or deletion mark; double-click to open it in
 Single picture. In Grid, **X** toggles the deletion mark and advances within that
 grid's pictures. Previews load in the background with a bounded memory cache.
 
+The filter bar above the picture tabs filters both the folder tree and grid by
+one library tag, an exact rating (including Unrated) or minimum rating, and
+deletion status. Conditions combine: a picture must match every selected filter.
+Ratings use the saved app rating when present, otherwise the embedded image
+rating. **Reset** restores all pictures; opening another library resets filters.
+The count shows matching pictures within the selected folder and its subfolders.
+Left/Right, X, and rating shortcuts follow the filtered picture order. Editing
+tags, ratings, or deletion marks updates results immediately; if the current
+picture stops matching, selection moves to the next matching picture, or the
+first remaining match when there is no later one. No matches clears the picture
+and shows an empty-results message. Filters do not change files or metadata.
+
 In either viewer subtab, **Left/Right** selects the previous/next picture, stopping
 at the first or last picture. **1–5** saves that rating and advances to the next
 picture; **0** clears the rating and also advances. Pressing the current rating's

@@ -352,6 +352,130 @@ def check_review_gui():
             return QtCore.QSettings(str(self.root / 'preferences.ini'),
                                     QtCore.QSettings.Format.IniFormat)
 
+        def prepare_filters(self):
+            from viewview.core.tags import add_tags
+            from viewview.core.review import set_rating, set_deletion_mark
+            self.nested = self.root / 'nested'
+            self.nested.mkdir()
+            self.third = self.nested / 'third.jpg'
+            exif = Image.Exif()
+            exif[Base.Rating] = 4
+            Image.new('RGB', (24, 16), 'blue').save(self.third, exif=exif)
+            add_tags(self.root, ['family'], [review_path(self.root, self.paths[0]),
+                                            review_path(self.root, self.third)])
+            add_tags(self.root, ['holiday'], [review_path(self.root, self.paths[1])])
+            set_rating(self.root, self.paths[0], 5)
+            set_deletion_mark(self.root, self.paths[0], True)
+            self.widget._refresh_library()
+
+        def choose_filter(self, control, value):
+            index = next((index for index in range(control.count())
+                          if control.itemData(index) == value), -1)
+            self.assertGreaterEqual(index, 0)
+            control.setCurrentIndex(index)
+            app.processEvents()
+
+        def test_filters_combine_and_reset_in_tree_and_grid(self):
+            self.prepare_filters()
+            filters = self.widget.filters
+            self.choose_filter(filters.tag, 'family')
+            self.assertEqual(set(self.widget.grid.model.paths), {self.paths[0], self.third})
+            self.choose_filter(filters.rating, ('minimum', 4))
+            self.assertEqual(set(self.widget.grid.model.paths), {self.paths[0], self.third})
+            self.choose_filter(filters.deletion, True)
+            self.assertEqual(self.widget.grid.model.paths, (self.paths[0],))
+            self.assertTrue(self.widget.file_management._folder_items[self.nested].isHidden())
+            visible = [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                       for item in self.widget.file_management._image_items if not item.isHidden()]
+            self.assertEqual(visible, [self.paths[0]])
+            filters.reset_button.click()
+            self.assertEqual(set(self.widget.grid.model.paths), {*self.paths, self.third})
+            self.assertFalse(self.widget.file_management._folder_items[self.nested].isHidden())
+
+        def test_unrated_respects_embedded_rating_and_explicit_zero(self):
+            self.prepare_filters()
+            self.choose_filter(self.widget.filters.rating, ('exact', 0))
+            self.assertEqual(self.widget.grid.model.paths, (self.paths[1],))
+            self.widget.filters.reset()
+            self.widget.set_current_image(self.third)
+            self.widget.set_rating(0)
+            self.choose_filter(self.widget.filters.rating, ('exact', 0))
+            self.assertEqual(set(self.widget.grid.model.paths), {self.paths[1], self.third})
+
+        def test_filtered_shortcuts_do_not_skip_when_edit_hides_current(self):
+            self.prepare_filters()
+            for tab in (0, 1):
+                from viewview.core.review import set_rating
+                for path in self.paths:
+                    set_rating(self.root, path, 0)
+                self.widget.filters.reset()
+                self.widget.view_tabs.setCurrentIndex(tab)
+                self.choose_filter(self.widget.filters.rating, ('exact', 0))
+                self.widget.set_current_image(self.paths[0])
+                self.press_key(QtCore.Qt.Key.Key_5)
+                self.assertEqual(self.widget.image_path, self.paths[1])
+                self.assertEqual(read_rating(self.root, self.paths[0]), 5)
+                self.press_key(QtCore.Qt.Key.Key_Left)
+                self.assertEqual(self.widget.image_path, self.paths[1])
+
+        def test_deletion_and_tag_edits_update_active_results(self):
+            self.prepare_filters()
+            self.choose_filter(self.widget.filters.tag, 'family')
+            self.widget.set_current_image(self.paths[0])
+            self.widget.remove_photo_tag('family')
+            self.assertEqual(self.widget.grid.model.paths, (self.third,))
+            self.assertEqual(self.widget.image_path, self.third)
+            self.widget.filters.reset()
+            self.choose_filter(self.widget.filters.deletion, False)
+            self.widget.set_current_image(self.third)
+            self.press_x()
+            self.assertNotIn(self.third, self.widget.grid.model.paths)
+            self.assertEqual(self.widget.image_path, self.paths[1])
+
+        def test_no_matches_clear_picture_and_reset_restores_results(self):
+            self.prepare_filters()
+            self.choose_filter(self.widget.filters.tag, 'holiday')
+            self.choose_filter(self.widget.filters.deletion, True)
+            self.assertEqual(self.widget.grid.model.paths, ())
+            self.assertIsNone(self.widget.image_path)
+            self.assertFalse(self.widget.metadata._ratingw.isEnabled())
+            self.assertIn('No pictures match', self.widget.image_display.text())
+            self.widget.filters.reset()
+            self.assertEqual(len(self.widget.grid.model.paths), 3)
+            self.assertNotIn('No pictures match', self.widget.image_display.text())
+
+        def test_grid_filters_keep_selected_folder_scope(self):
+            self.prepare_filters()
+            self.widget.view_tabs.setCurrentIndex(1)
+            self.widget.select_grid_folder(self.nested)
+            self.choose_filter(self.widget.filters.tag, 'holiday')
+            self.assertEqual(self.widget.grid.model.paths, ())
+            self.assertEqual(self.widget._grid_folder, self.nested)
+            self.assertIn('0 of 1', self.widget.filters.status.text())
+            self.widget.filters.reset()
+            self.assertEqual(self.widget.grid.model.paths, (self.third,))
+
+        def test_filter_combo_keeps_arrow_keys_for_choosing_options(self):
+            self.prepare_filters()
+            control = self.widget.filters.rating
+            control.setFocus()
+            app.processEvents()
+            QtTest.QTest.keyClick(control, QtCore.Qt.Key.Key_Down)
+            self.assertEqual(control.currentIndex(), 1)
+            self.assertFalse(any(shortcut.isEnabled() for shortcut in self.widget._rating_shortcuts))
+
+        def test_filters_reset_when_library_changes(self):
+            self.prepare_filters()
+            self.choose_filter(self.widget.filters.tag, 'family')
+            other = self.root / 'another-library'
+            other.mkdir()
+            Image.new('RGB', (24, 16), 'blue').save(other / 'new.jpg')
+            with patch.object(QtWidgets.QFileDialog, 'getExistingDirectory', return_value=str(other)):
+                self.widget.select_folder()
+            self.assertFalse(self.widget.filters.is_active())
+            self.assertEqual(self.widget.filters.tag.count(), 1)
+            self.assertEqual(self.widget.grid.model.paths, (other / 'new.jpg',))
+
         def test_last_library_persists_and_restores_without_picker(self):
             widget = self.open_window(self.root, settings=self.settings())
             self.assertEqual(self.settings().value('library/lastPath'), str(self.root))
