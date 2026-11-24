@@ -69,6 +69,84 @@ def check_review_gui():
             self.assertEqual(read_deletion_marks(self.root), set())
             self.assertTrue(all(path.exists() for path in self.paths))
 
+        def press_key(self, key):
+            self.widget.activateWindow()
+            target = (self.widget.grid.view if self.widget.view_tabs.currentIndex() == 1
+                      else self.widget.file_management._list)
+            target.setFocus()
+            app.processEvents()
+            QtTest.QTest.keyClick(target, key)
+            app.processEvents()
+
+        def test_arrow_navigation_in_both_views_stops_at_boundaries(self):
+            first, second = self.paths
+            for tab in (0, 1):
+                self.widget.view_tabs.setCurrentIndex(tab)
+                self.widget.set_current_image(first)
+                self.press_key(QtCore.Qt.Key.Key_Left)
+                self.assertEqual(self.widget.image_path, first)
+                self.press_key(QtCore.Qt.Key.Key_Right)
+                self.assertEqual(self.widget.image_path, second)
+                self.press_key(QtCore.Qt.Key.Key_Right)
+                self.assertEqual(self.widget.image_path, second)
+                self.press_key(QtCore.Qt.Key.Key_Left)
+                self.assertEqual(self.widget.image_path, first)
+
+        def test_rating_keys_persist_advance_and_do_not_toggle_same_rating(self):
+            first, second = self.paths
+            for tab in (0, 1):
+                self.widget.view_tabs.setCurrentIndex(tab)
+                for number in (1, 2, 3, 4, 5, 0):
+                    self.widget.set_current_image(first)
+                    self.press_key(getattr(QtCore.Qt.Key, f'Key_{number}'))
+                    self.assertEqual(read_rating(self.root, first), number)
+                    self.assertEqual(self.widget.image_path, second)
+                self.press_key(QtCore.Qt.Key.Key_4)
+                self.press_key(QtCore.Qt.Key.Key_4)
+                self.assertEqual(self.widget.image_path, second)
+                self.assertEqual(read_rating(self.root, second), 4)
+                self.assertEqual(self.widget.metadata._ratingw.value(), 4)
+
+        def test_rating_failure_does_not_advance(self):
+            self.widget.set_current_image(self.paths[0])
+            with patch('viewview.gui.set_rating', side_effect=PermissionError('Read-only library')):
+                self.press_key(QtCore.Qt.Key.Key_5)
+            self.assertEqual(self.widget.image_path, self.paths[0])
+            self.assertEqual(self.widget.metadata._ratingw.value(), 0)
+            self.assertIn('Could not save rating', self.widget.metadata.review_error.text())
+
+        def test_navigation_and_rating_disabled_while_typing_and_on_import(self):
+            self.widget.set_current_image(self.paths[0])
+            entry = self.widget.metadata.tags_editor.input
+            entry.setFocus()
+            app.processEvents()
+            QtTest.QTest.keyClicks(entry, '12345')
+            QtTest.QTest.keyClick(entry, QtCore.Qt.Key.Key_Left)
+            self.assertEqual(entry.text(), '12345')
+            self.assertEqual(entry.cursorPosition(), 4)
+            self.assertEqual(self.widget.image_path, self.paths[0])
+            self.assertIsNone(read_rating(self.root, self.paths[0]))
+            self.widget.tabs.setCurrentIndex(1)
+            self.press_key(QtCore.Qt.Key.Key_5)
+            self.press_key(QtCore.Qt.Key.Key_Right)
+            self.assertEqual(self.widget.image_path, self.paths[0])
+            self.assertIsNone(read_rating(self.root, self.paths[0]))
+
+        def test_grid_navigation_stays_within_selected_folder(self):
+            folder = self.root / 'nested'
+            folder.mkdir()
+            nested = folder / 'only.jpg'
+            Image.new('RGB', (24, 16), 'blue').save(nested)
+            self.widget._refresh_library()
+            self.widget.select_grid_folder(folder)
+            self.widget.view_tabs.setCurrentIndex(1)
+            self.widget.set_current_image(nested)
+            self.press_key(QtCore.Qt.Key.Key_Left)
+            self.press_key(QtCore.Qt.Key.Key_Right)
+            self.press_key(QtCore.Qt.Key.Key_3)
+            self.assertEqual(self.widget.image_path, nested)
+            self.assertEqual(read_rating(self.root, nested), 3)
+
         def test_rating_is_editable_persistent_and_can_override_exif_with_zero(self):
             first, second = self.paths
             exif = Image.Exif()

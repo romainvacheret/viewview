@@ -674,6 +674,20 @@ class MainWidget(QtWidgets.QWidget):
         self._mark_shortcut.setAutoRepeat(False)
         self._mark_shortcut.activated.connect(self.mark_and_advance)
         self._mark_shortcut.setEnabled(False)
+        self._navigation_shortcuts = []
+        self._rating_shortcuts = []
+        for key, offset in (('Left', -1), ('Right', 1)):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(key), self)
+            shortcut.setAutoRepeat(False)
+            shortcut.activated.connect(lambda offset=offset: self.navigate_image(offset))
+            shortcut.setEnabled(False)
+            self._navigation_shortcuts.append(shortcut)
+        for rating in range(6):
+            shortcut = QtGui.QShortcut(QtGui.QKeySequence(str(rating)), self)
+            shortcut.setAutoRepeat(False)
+            shortcut.activated.connect(lambda rating=rating: self.rate_and_advance(rating))
+            shortcut.setEnabled(False)
+            self._rating_shortcuts.append(shortcut)
         self.tabs.currentChanged.connect(self._update_mark_shortcut)
         QtWidgets.QApplication.instance().focusChanged.connect(self._update_mark_shortcut)
 
@@ -807,6 +821,11 @@ class MainWidget(QtWidgets.QWidget):
         self._mark_shortcut.setEnabled(self.tabs.currentIndex() == 0
                                       and not editing
                                       and self.metadata.deletion_checkbox.isEnabled())
+        viewing = self.tabs.currentIndex() == 0 and not editing and self.image_path is not None
+        for shortcut in self._navigation_shortcuts:
+            shortcut.setEnabled(viewing)
+        for shortcut in self._rating_shortcuts:
+            shortcut.setEnabled(viewing and self.metadata._ratingw.isEnabled())
 
     def _load_review_state(self):
         library = getattr(self.file_management, '_selected_folder', None)
@@ -892,26 +911,38 @@ class MainWidget(QtWidgets.QWidget):
 
     def mark_and_advance(self):
         if self.tabs.currentIndex() == 0 and self.set_deletion_mark(not self._marked_for_deletion):
-            if self.view_tabs.currentIndex() == 1:
-                next_image = self.grid.next_image(self.image_path)
-                if next_image is not None:
-                    self.set_current_image(next_image)
-            else:
-                self.file_management.select_next_image(self.image_path)
+            self.navigate_image(1)
+
+    def navigate_image(self, offset):
+        if self.tabs.currentIndex() != 0 or self.image_path is None:
+            return
+        paths = (self.grid.model.paths if self.view_tabs.currentIndex() == 1 else
+                 [item.data(0, QtCore.Qt.ItemDataRole.UserRole)
+                  for item in self.file_management._image_items])
+        if self.image_path in paths:
+            index = paths.index(self.image_path) + offset
+            if 0 <= index < len(paths):
+                self.set_current_image(paths[index])
+
+    def rate_and_advance(self, rating):
+        if self.tabs.currentIndex() == 0 and self.set_rating(rating):
+            self.navigate_image(1)
 
     def set_rating(self, rating: int):
         library = getattr(self.file_management, '_selected_folder', None)
         if library is None or self.image_path is None or not self.metadata._ratingw.isEnabled():
-            return
+            return False
         try:
             set_rating(library, self.image_path, rating)
         except (OSError, ValueError) as failure:
             self.metadata.set_rating_state(self._saved_rating, True)
             self.metadata.set_review_state(self._marked_for_deletion, True,
                                            f'Could not save rating: {failure}')
-            return
+            return False
         self._saved_rating = rating
+        self.metadata.set_rating_state(rating, True)
         self.metadata.set_review_state(self._marked_for_deletion, True)
+        return True
 
 
 def main() -> int:

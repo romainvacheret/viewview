@@ -17,6 +17,15 @@ to select it and edit its rating or deletion mark; double-click to open it in
 Single picture. In Grid, **X** toggles the deletion mark and advances within that
 grid's pictures. Previews load in the background with a bounded memory cache.
 
+In either viewer subtab, **Left/Right** selects the previous/next picture, stopping
+at the first or last picture. **1–5** saves that rating and advances to the next
+picture; **0** clears the rating and also advances. Pressing the current rating's
+number keeps that rating. Navigation
+follows tree order in Single picture and the selected folder's pictures in Grid.
+Rating shortcuts stay on the current picture if saving fails. These shortcuts
+and **X** are inactive while typing in a text field or using tag suggestions,
+and on the Import tab.
+
 In the Viewer tab, the right panel's **To be deleted** checkbox saves a review
 mark without deleting the file. Press **X** to toggle the current picture's mark and
 select the next picture; on the last picture, it stays selected. Uncheck the box
